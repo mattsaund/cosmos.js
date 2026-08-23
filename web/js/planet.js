@@ -268,13 +268,24 @@ var Cosmos = (function () {
       }
       b.max = m * 1.05;
     }
-    /* Horizontal and vertical extents are set apart, not shared. A tilted ring
-       system is wide and flat: forcing a square frame around it leaves the body
-       swimming in empty sky above and below. */
-    b.extX = (b.rings ? c.ringOuter : b.max) * 1.02;
-    b.extY = b.rings
-      ? Math.max(b.max, c.ringOuter * Math.abs(Math.sin(c.tilt)) + 0.15) * 1.06
-      : b.max * 1.02;
+    /* How far the body reaches along each screen axis, worked out separately:
+       a tilted ring system is wide and flat, and forcing a square frame around
+       it leaves the body swimming in empty sky above and below.
+
+       The rings lie in the plane perpendicular to the body's axis n, and
+       {u, v, n} is orthonormal, so a ring of radius r projects onto a screen
+       axis to exactly r * sqrt(1 - n_axis^2). Deriving the vertical extent from
+       tilt alone was the bug behind rings cut off top and bottom: roll turns the
+       axis within the view plane, so a rolled body at shallow tilt has rings
+       reaching nearly the full radius vertically, where the old formula
+       expected almost none of it. */
+    var axisX = -Math.sin(c.roll) * Math.cos(c.tilt);
+    var axisY = Math.cos(c.roll) * Math.cos(c.tilt);
+    var ringX = b.rings ? c.ringOuter * Math.sqrt(Math.max(0, 1 - axisX * axisX)) : 0;
+    var ringY = b.rings ? c.ringOuter * Math.sqrt(Math.max(0, 1 - axisY * axisY)) : 0;
+    var MARGIN = 1.03;                    // a little air so nothing meets the edge
+    b.extX = Math.max(b.max, ringX) * MARGIN;
+    b.extY = Math.max(b.max, ringY) * MARGIN;
     /* Columns follow from the frame's aspect and the glyph's, so the disk comes
        out round rather than as an egg. */
     b.cols = Math.max(8, Math.round(b.rows * (b.extX / b.extY) / CHAR_ASPECT));

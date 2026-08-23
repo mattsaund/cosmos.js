@@ -26,6 +26,14 @@
           Menlo, Consolas, "Liberation Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --r: 4px;
+
+  /* Chrome above the tool: the header bar plus the app's own padding. Used to
+     size the first row against the window, so keep them in step. */
+  --bar-h:   58px;
+  --app-pad: clamp(12px, 1.6vw, 18px);
+  /* How much of the code panel sits above the fold. Enough for its tab row and
+     a line or two of source, so it is obvious there is more to scroll to. */
+  --code-peek: 112px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -48,7 +56,14 @@ body {
   margin: 0; font: 500 18px/1 var(--mono); letter-spacing: -0.01em;
 }
 .bar h1::before { content: "~/"; color: var(--accent); }
-.bar p { margin: 0; color: var(--fg-3); font-size: 13px; }
+/* Same size the tagline was, so the bar keeps the height --bar-h assumes. */
+.bar .repo {
+  font: 400 13px/1.5 var(--mono);
+  color: var(--fg-3);
+  text-decoration: none;
+  transition: color .15s;
+}
+.bar .repo:hover { color: var(--fg); text-decoration: underline; }
 
 /* --- layout -------------------------------------------------
    Controls hold a fixed column; the preview takes the rest and the
@@ -58,8 +73,8 @@ body {
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
   grid-template-areas: "controls preview" "code code";
-  gap: clamp(12px, 1.6vw, 18px);
-  padding: clamp(12px, 1.6vw, 18px);
+  gap: var(--app-pad);
+  padding: var(--app-pad);
   /* Stretch, not start: the preview panel matches the height of the controls
      column beside it instead of stopping at its own content. */
   align-items: stretch;
@@ -74,6 +89,20 @@ body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "preview" "controls" "code";
   }
+}
+
+/* The first screen is the tool: the preview fills the window top to bottom, so
+   a wide ring system has the whole viewport to sit in. Without this the row is
+   as tall as the controls column, which is taller than most windows, and the
+   preview's middle ends up below the fold. The controls scroll inside their own
+   column instead of stretching the row; the code panes are a scroll away. */
+@media (min-width: 901px) {
+  .app { grid-template-rows: calc(100vh - var(--bar-h) - 2 * var(--app-pad) - var(--code-peek)) auto; }
+  .app { grid-template-rows: calc(100dvh - var(--bar-h) - 2 * var(--app-pad) - var(--code-peek)) auto; }
+  .controls { overflow-y: auto; }
+  /* Both need to be allowed to shrink below their content, or the grid row
+     cannot cap them. */
+  .preview, .stage { min-height: 0; }
 }
 
 .panel {
@@ -145,8 +174,16 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
   border: 1px solid var(--line-2); cursor: pointer;
 }
 .seg button:first-child { border-radius: var(--r) 0 0 var(--r); }
-.seg button:last-child  { border-radius: 0 var(--r) var(--r) 0; border-left: 0; }
-.seg button.is-on { color: var(--accent); border-color: var(--accent); background: var(--on-bg); }
+.seg button:last-child  { border-radius: 0 var(--r) var(--r) 0; }
+/* Pull the neighbour onto the shared edge so the two borders read as one
+   hairline. Dropping a border instead would leave the selected button missing
+   that side of its outline, which is what used to happen here. */
+.seg button + button { margin-left: -1px; }
+/* Raised, so its complete outline draws over the neighbour's grey. */
+.seg button.is-on {
+  color: var(--accent); border-color: var(--accent); background: var(--on-bg);
+  position: relative; z-index: 1;
+}
 
 button {
   font: 400 12px/1 var(--mono);
@@ -171,7 +208,10 @@ button:hover { color: var(--accent); border-color: var(--accent); }
    others. The planet is meant to be ASCII and nothing else. */
 .stage {
   flex: 1 1 auto;
-  display: grid; place-items: center;
+  /* safe: if the art is ever larger than the box anyway, centring would put
+     its top-left corner outside the scrollable area, where it cannot be
+     reached. safe centring falls back to start alignment in that case. */
+  display: grid; place-items: safe center;
   min-height: 420px; padding: 16px;
   background: var(--bg);
   border-radius: 0 0 var(--r) var(--r);
@@ -188,12 +228,16 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 /* --- code ---------------------------------------------------- */
 .tabs { display: flex; gap: 0; }
 .tab {
-  border-radius: 0; border-right: 0;
+  border-radius: 0;
   color: var(--fg-3);
 }
 .tab:first-child { border-radius: var(--r) 0 0 var(--r); }
-.tab:last-child  { border-radius: 0 var(--r) var(--r) 0; border-right: 1px solid var(--line-2); }
-.tab.is-on { color: var(--accent); border-color: var(--accent); background: var(--on-bg); }
+.tab:last-child  { border-radius: 0 var(--r) var(--r) 0; }
+.tab + .tab { margin-left: -1px; }
+.tab.is-on {
+  color: var(--accent); border-color: var(--accent); background: var(--on-bg);
+  position: relative; z-index: 1;
+}
 
 .src {
   display: none;

@@ -43,7 +43,10 @@
     { key: 'size', name: 'size', type: 'range', min: 5, max: 26, step: 1,
       fmt: function (v) { return Math.round(v) + ' px'; }, preview: true },
     { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 1.8, step: 0.01 },
-    { key: 'ambient', name: 'night side', type: 'range', min: 0, max: 0.6, step: 0.01 },
+    /* Writes ambient light, but reads as its opposite: more shadow is less
+       light on the night side. See toSlider/fromSlider. */
+    { key: 'ambient', name: 'shadow', type: 'range', min: 0, max: 0.6, step: 0.01,
+      invert: true },
     { key: 'craters', name: 'crater count', type: 'range', min: 0, max: 45, step: 1,
       fmt: function (v) { return String(Math.round(v)); } },
     { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4, step: 0.01 },
@@ -71,8 +74,15 @@
   }
   startExtremes(cfg);
 
+  /* A slider can run the opposite way to the value it writes. Keeping the
+     conversion in one pair of functions means the handler, the readout and the
+     initial position cannot disagree about which way round it is. */
+  function toSlider(c, v) { return c.invert ? (c.min + c.max - v) : v; }
+  function fromSlider(c, p) { return c.invert ? (c.min + c.max - p) : p; }
+
   var host = document.getElementById('controls');
   var out = document.getElementById('out');
+  var stage = document.querySelector('.stage');
   var dims = document.getElementById('dims');
   var spin = document.getElementById('spin');
   var nodes = {};
@@ -143,7 +153,7 @@
 
     if (c.type === 'range' || c.type === 'number') {
       input.addEventListener('input', function () {
-        cfg[c.key] = Number(input.value);
+        cfg[c.key] = fromSlider(c, Number(input.value));
         sync();
         /* Size and colour only touch how the preview is painted, so they can
            skip rebuilding the body and re-emitting the code. */
@@ -180,13 +190,15 @@
       } else if (c.type === 'check') {
         nd.input.checked = !!v;
       } else {
-        nd.input.value = v;
+        nd.input.value = toSlider(c, v);
       }
 
       if (c.type === 'check' || c.type === 'color') nd.val.textContent = '';
       else if (c.type === 'select') nd.val.textContent = '';
       else if (c.type === 'seg') nd.val.textContent = '';
-      else nd.val.textContent = c.fmt ? c.fmt(v) : Number(v).toFixed(2);
+      /* Read out what the slider shows, not what it writes. */
+      else nd.val.textContent = c.fmt ? c.fmt(toSlider(c, v))
+                                      : Number(toSlider(c, v)).toFixed(2);
 
       /* Ring radii are meaningless with the rings switched off. */
       if (c.when) nd.wrap.style.display = cfg[c.when] ? '' : 'none';
@@ -206,15 +218,36 @@
 
   function rebuild() {
     body = Cosmos.build(cfg);
-    dims.textContent = body.cols + ' x ' + body.rows + ' glyphs';
     paint();
     code();
   }
 
+  /* The largest type this body can be drawn at and still fit the stage whole.
+
+     A wide ring system needs a frame several times the planet's own width, so
+     at anything but a small size the art is wider than the panel. Clipping it
+     was bad on its own, and a centred overflow is worse than a plain one: what
+     spills past the top and left edges cannot be scrolled to at all, so the
+     planet simply hung off an invisible box. Capping the painted size instead
+     means the whole body is always on screen, and `size` reads as a preferred
+     maximum rather than a promise. */
+  function fitSize() {
+    var cs = getComputedStyle(stage);
+    var w = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    var h = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    if (!(w > 0 && h > 0)) return cfg.size;      // not laid out yet
+    var byWidth = w / (body.cols * Cosmos.aspect());
+    var byHeight = h / body.rows;
+    return Math.max(2, Math.min(cfg.size, byWidth, byHeight));
+  }
+
   function paint() {
-    out.style.fontSize = cfg.size + 'px';
+    var fs = fitSize();
+    out.style.fontSize = fs.toFixed(2) + 'px';
     out.style.color = cfg.color;
     out.textContent = Cosmos.render(body, angle);
+    dims.textContent = body.cols + ' x ' + body.rows + ' glyphs'
+                     + (fs < cfg.size - 0.05 ? '   fitted to ' + fs.toFixed(1) + 'px' : '');
   }
 
   function tick(now) {
@@ -351,6 +384,12 @@
     ping();
     setInterval(ping, 2000);
   }
+
+  var refit;
+  window.addEventListener('resize', function () {
+    clearTimeout(refit);
+    refit = setTimeout(paint, 100);
+  });
 
   sync();
   rebuild();
