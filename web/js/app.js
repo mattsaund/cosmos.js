@@ -371,18 +371,25 @@
 
   /* --- launcher handshake ---------------------------------- *
      cosmos.py serves this page and shuts down when the pings stop, so closing
-     the tab closes the program. Opened straight off the disk over file:// there
-     is nothing listening, and nothing to tell. keepalive lets the last ping
-     survive the page going away, which only shortens the wait. */
+     the tab closes the program. Opened over file:// there is nothing listening
+     and nothing to tell. keepalive lets the last ping survive the page going
+     away, which only shortens the wait.
+
+     The first ping decides whether to keep going. This page is also hosted on a
+     plain static server, where /__alive is simply not a route: pinging it every
+     two seconds forever would be a 404 on a loop for every visitor. One probe
+     that quietly gives up costs a single request. */
   if (location.protocol === 'http:' || location.protocol === 'https:') {
     var ping = function () {
-      try {
-        fetch('/__alive', { method: 'POST', keepalive: true })
-          .catch(function () { /* not our launcher; harmless */ });
-      } catch (e) { /* no fetch: the launcher falls back to its timeout */ }
+      return fetch('/__alive', { method: 'POST', keepalive: true })
+        .then(function (r) { return r.ok; })
+        .catch(function () { return false; });
     };
-    ping();
-    setInterval(ping, 2000);
+    try {
+      ping().then(function (listening) {
+        if (listening) setInterval(ping, 2000);
+      });
+    } catch (e) { /* no fetch: the launcher falls back to its own timeout */ }
   }
 
   var refit;

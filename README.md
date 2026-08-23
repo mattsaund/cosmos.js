@@ -4,7 +4,9 @@ An ASCII planet generator for any project you want to have an animated planet. T
 
 Nothing is pre-rendered. Every glyph is a ray cast at a body, shaded from a real lighting model, and quantised onto a density ramp.
 
-## Run it
+See it here: https://msaunders.dev/cosmos/
+
+## Run it locally
 
 #### Python web server:
 
