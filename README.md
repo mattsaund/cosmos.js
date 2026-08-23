@@ -40,7 +40,7 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 | **rotation speed** | radians per second                                                 |
 | **direction**      | clockwise or counterclockwise, as seen with the pole toward you    |
 | **rings**          | draw a ring system, with inner and outer radii                     |
-| **colour**         | ink colour, carried into both exports as hex and as an ANSI escape |
+| **color**          | ink colour, carried into both exports as hex and as an ANSI escape |
 | **seed**           | which craters, fractures and lumps you get                         |
 
 **Randomize** generates a completely random planet. **Reset** sets everything to default
@@ -48,27 +48,7 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 
 Both programs allow you to copy raw Python or JavaScript code for the planet you create. You can use this code in any project or website you want. pass the argument `--once` for a single frame. The JavaScript runs in a browser (it appends a `<pre>` and animates) or under Node
 (it prints one frame).
-## How it works
 
-Each cell of the grid is one ray, fired straight down the z axis:
-
-1. **Hit the body.** For a sphere that is one square root. For a lumpy body the
-   radius varies with direction, so there is no closed form and the ray gets
-   bisected instead. Newton's method would take fewer steps but blows up near
-   the silhouette, where the surface is edge-on.
-2. **Shade it.** Lambertian falloff against a fixed key light, plus limb
-   darkening, plus an ambient floor so the night side does not go flat black.
-3. **Texture it.** The hit point is rotated into *body* space and looked up. That
-   rotation is what makes the surface travel as the planet turns, rather than
-   sitting still like a decal on the screen.
-4. **Composite the rings.** Rings are a translucent sheet, not a surface: a faint
-   band crossing in front of the planet has to blend over it. They also carry
-   density clumps that shear on a Keplerian profile, because a perfectly
-   symmetric annulus looks identical at every angle and reads as frozen.
-5. **Quantise.** The result indexes into `" .:-=+*#%@"`, Bourke's ramp. Ink
-   density rises monotonically across it, which the obvious-looking
-   `".,:;=+ic*ox%#@"` does not: `i` and `c` read lighter than `=` and `+`, so
-   gradients come out mottled.
 ## Files
 
 ```
