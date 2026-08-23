@@ -2,29 +2,29 @@
 
 An ASCII planet generator for any project you want to have an animated planet. Tune a specific planet with sliders, then copy the generated code into whatever project you want.
 
-Nothing is pre-rendered. Every glyph is a ray cast at a body, shaded from a real
-lighting model, and quantised onto a density ramp.
+Nothing is pre-rendered. Every glyph is a ray cast at a body, shaded from a real lighting model, and quantised onto a density ramp.
+
 ## Run it
-#### Standalone (Python):
+
+#### Python web server:
 
 ```sh
 python3 cosmos.py
 ```
 
-Requires **tkinter**.  Follow output directions if output says so.
+It serves `web/` on a free loopback port, opens your browser at it, and stops when you close the tab. Python Standard library only.  nothing to install.
 
-Two headless modes (nogui):
+Headless modes (nogui):
 
 ```sh
-python3 cosmos.py --render      # one frame to stdout
-python3 cosmos.py --emit py     # print the standalone Python
-python3 cosmos.py --emit js     # print the standalone JavaScript
+python3 cosmos.py --no-open # just print the URL
+python3 cosmos.py --port 8000 # a fixed port instead of a free one
+python3 cosmos.py --verbose # log every request
 ```
 
-#### Web (HTML):
+#### HTML Index File:
 
-There is also a browser build in `web/` with the same controls. Open
-`web/index.html` or launch a local html server.
+There is also a browser build in `web/` with the same controls. Open `web/index.html` or launch a local html server. The Python script is for a web server setup and future expandability.
 
 ## Controls
 
@@ -72,16 +72,13 @@ Each cell of the grid is one ray, fired straight down the z axis:
 ## Files
 
 ```
-cosmos.py          entry point: the window, or --render / --emit
-cosmos/planet.py   the renderer: pure computation, no tkinter
-cosmos/emit.py     turns a config into standalone Python or JavaScript
-cosmos/ui.py       the tkinter window
+cosmos.py serves web/, stops when the tab closes
 
-web/index.html     the browser build
-web/js/planet.js   the same renderer in JavaScript
-web/js/emit.js     the same emitters
-web/js/app.js      controls, preview loop, code panes
-web/css/app.css    chrome
+web/index.html the app
+web/js/planet.js the renderer: pure computation, no DOM
+web/js/emit.js turns a config into standalone Python or JavaScript
+web/js/app.js controls, preview loop, code panes, launcher heartbeat
+web/css/app.css chrome
 ```
 ## Credits
 

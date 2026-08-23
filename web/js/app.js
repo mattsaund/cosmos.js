@@ -336,6 +336,22 @@
     emit: Emit
   };
 
+  /* --- launcher handshake ---------------------------------- *
+     cosmos.py serves this page and shuts down when the pings stop, so closing
+     the tab closes the program. Opened straight off the disk over file:// there
+     is nothing listening, and nothing to tell. keepalive lets the last ping
+     survive the page going away, which only shortens the wait. */
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    var ping = function () {
+      try {
+        fetch('/__alive', { method: 'POST', keepalive: true })
+          .catch(function () { /* not our launcher; harmless */ });
+      } catch (e) { /* no fetch: the launcher falls back to its timeout */ }
+    };
+    ping();
+    setInterval(ping, 2000);
+  }
+
   sync();
   rebuild();
   requestAnimationFrame(tick);

@@ -60,10 +60,13 @@ body {
   grid-template-areas: "controls preview" "code code";
   gap: clamp(12px, 1.6vw, 18px);
   padding: clamp(12px, 1.6vw, 18px);
-  align-items: start;
+  /* Stretch, not start: the preview panel matches the height of the controls
+     column beside it instead of stopping at its own content. */
+  align-items: stretch;
 }
 .controls { grid-area: controls; }
-.preview  { grid-area: preview; }
+/* A column, so the stage can take every pixel the panel head does not. */
+.preview  { grid-area: preview; display: flex; flex-direction: column; }
 .code     { grid-area: code; }
 
 @media (max-width: 900px) {
@@ -159,12 +162,18 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .dim { color: var(--fg-3); }
 
 /* --- preview -------------------------------------------------
-   The stage is a fixed height so the layout does not jump every time
-   the resolution slider moves. */
+   Grows to fill the panel, with the planet centred in whatever height that
+   turns out to be. The min-height only matters if the controls column is ever
+   the shorter of the two.
+
+   Flat black on purpose. This carried a faint radial wash behind the planet,
+   which is invisible on some monitors and reads as a halo around the art on
+   others. The planet is meant to be ASCII and nothing else. */
 .stage {
+  flex: 1 1 auto;
   display: grid; place-items: center;
   min-height: 420px; padding: 16px;
-  background: radial-gradient(circle at 50% 45%, #101010 0%, #000000 70%);
+  background: var(--bg);
   border-radius: 0 0 var(--r) var(--r);
   overflow: auto;
 }
