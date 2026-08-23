@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cosmos.js - ASCII planet generator</title>
+<meta name="description" content="Design an ASCII planet with live preview, then copy it out as standalone Python or JavaScript.">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="bar">
+  <h1>cosmos.js</h1>
+  <p>ASCII planet generator. Tune it on the left, copy the code out below.</p>
+</header>
+
+<main class="app">
+
+  <!-- Controls are built by js/app.js from a single spec, so the sliders and
+       the exported config cannot drift apart. -->
+  <section class="panel controls" aria-label="Controls">
+    <div id="controls"></div>
+    <div class="row">
+      <button type="button" id="randomize">Randomize</button>
+      <button type="button" id="reset">Reset</button>
+    </div>
+  </section>
+
+  <section class="panel preview" aria-label="Preview">
+    <div class="panel__head">
+      <span id="dims" class="dim">-</span>
+      <label class="check"><input type="checkbox" id="spin" checked> spin</label>
+    </div>
+    <div class="stage"><pre id="out" aria-live="off"></pre></div>
+  </section>
+
+  <section class="panel code" aria-label="Generated code">
+    <div class="panel__head">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab is-on" data-pane="py">planet.py</button>
+        <button type="button" role="tab" class="tab" data-pane="js">planet.js</button>
+      </div>
+      <button type="button" id="copy">Copy</button>
+    </div>
+    <pre class="src is-on" id="pane-py"><code></code></pre>
+    <pre class="src" id="pane-js"><code></code></pre>
+  </section>
+
+</main>
+
+<script src="js/planet.js"></script>
+<script src="js/emit.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

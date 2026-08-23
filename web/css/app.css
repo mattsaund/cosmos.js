@@ -1,0 +1,201 @@
+/* ============================================================
+   cosmos.js : app chrome
+
+   Dark, monospace-forward, deliberately plain. The planet is the
+   only thing here meant to draw the eye, so everything around it
+   stays flat and quiet.
+   ============================================================ */
+
+:root {
+  /* Black and white, no hue anywhere. The planet is the only thing on the page
+     allowed a colour, and it gets that from the picker. */
+  --bg:      #000000;
+  --panel:   #0a0a0a;
+  --panel-2: #131313;
+  --line:    #1e1e1e;
+  --line-2:  #2f2f2f;
+
+  --fg:      #f2f2f2;
+  --fg-2:    #9a9a9a;
+  --fg-3:    #5f5f5f;
+
+  --accent:  #ffffff;   /* the "selected" ink, not a hue */
+  --on-bg:   #1c1c1c;   /* fill behind a selected tab or toggle */
+
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono",
+          Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --r: 4px;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* --- header ------------------------------------------------- */
+.bar {
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  padding: 18px clamp(16px, 3vw, 28px);
+  border-bottom: 1px solid var(--line);
+}
+.bar h1 {
+  margin: 0; font: 500 18px/1 var(--mono); letter-spacing: -0.01em;
+}
+.bar h1::before { content: "~/"; color: var(--accent); }
+.bar p { margin: 0; color: var(--fg-3); font-size: 13px; }
+
+/* --- layout -------------------------------------------------
+   Controls hold a fixed column; the preview takes the rest and the
+   code panes run the full width underneath, where long lines have
+   room to breathe. */
+.app {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-areas: "controls preview" "code code";
+  gap: clamp(12px, 1.6vw, 18px);
+  padding: clamp(12px, 1.6vw, 18px);
+  align-items: start;
+}
+.controls { grid-area: controls; }
+.preview  { grid-area: preview; }
+.code     { grid-area: code; }
+
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "preview" "controls" "code";
+  }
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.panel__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  font: 400 12px/1 var(--mono); color: var(--fg-3);
+}
+
+/* --- controls ----------------------------------------------- */
+.controls { padding: 4px 14px 14px; }
+
+.ctl { padding: 11px 0; border-bottom: 1px solid var(--line); }
+.ctl:last-of-type { border-bottom: 0; }
+.ctl__top {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  margin-bottom: 7px;
+}
+.ctl__name { font: 400 12px/1 var(--mono); letter-spacing: .02em; color: var(--fg-2); }
+.ctl__val  { font: 400 12px/1 var(--mono); color: var(--accent); }
+
+/* A flat track with a square thumb, to match the terminal feel. */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 3px; margin: 6px 0;
+  background: var(--line-2); border-radius: 2px; outline: none; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 13px; height: 13px; border: 0; border-radius: 2px;
+  background: var(--accent); cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 13px; height: 13px; border: 0; border-radius: 2px;
+  background: var(--accent); cursor: pointer;
+}
+input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+
+select, input[type="number"] {
+  width: 100%; padding: 7px 9px;
+  font: 400 12.5px/1 var(--mono);
+  color: var(--fg); background: var(--panel-2);
+  border: 1px solid var(--line-2); border-radius: var(--r);
+}
+input[type="color"] {
+  width: 100%; height: 30px; padding: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--line-2); border-radius: var(--r);
+  cursor: pointer;
+}
+.check {
+  display: inline-flex; align-items: center; gap: 7px;
+  font: 400 12px/1 var(--mono); color: var(--fg-2); cursor: pointer;
+}
+input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
+
+/* Two buttons that pick between opposed values, for things where a slider
+   would be pretending there is a range. */
+.seg { display: flex; gap: 0; }
+.seg button {
+  flex: 1; padding: 7px 0;
+  font: 400 12px/1 var(--mono);
+  color: var(--fg-2); background: var(--panel-2);
+  border: 1px solid var(--line-2); cursor: pointer;
+}
+.seg button:first-child { border-radius: var(--r) 0 0 var(--r); }
+.seg button:last-child  { border-radius: 0 var(--r) var(--r) 0; border-left: 0; }
+.seg button.is-on { color: var(--accent); border-color: var(--accent); background: var(--on-bg); }
+
+button {
+  font: 400 12px/1 var(--mono);
+  color: var(--fg); background: var(--panel-2);
+  border: 1px solid var(--line-2); border-radius: var(--r);
+  padding: 8px 12px; cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+button:hover { color: var(--accent); border-color: var(--accent); }
+
+.row { display: flex; gap: 8px; margin-top: 14px; }
+.row button { flex: 1; }
+.dim { color: var(--fg-3); }
+
+/* --- preview -------------------------------------------------
+   The stage is a fixed height so the layout does not jump every time
+   the resolution slider moves. */
+.stage {
+  display: grid; place-items: center;
+  min-height: 420px; padding: 16px;
+  background: radial-gradient(circle at 50% 45%, #101010 0%, #000000 70%);
+  border-radius: 0 0 var(--r) var(--r);
+  overflow: auto;
+}
+#out {
+  margin: 0;
+  font-family: var(--mono);
+  line-height: 1;
+  white-space: pre;
+  color: var(--accent);
+}
+
+/* --- code ---------------------------------------------------- */
+.tabs { display: flex; gap: 0; }
+.tab {
+  border-radius: 0; border-right: 0;
+  color: var(--fg-3);
+}
+.tab:first-child { border-radius: var(--r) 0 0 var(--r); }
+.tab:last-child  { border-radius: 0 var(--r) var(--r) 0; border-right: 1px solid var(--line-2); }
+.tab.is-on { color: var(--accent); border-color: var(--accent); background: var(--on-bg); }
+
+.src {
+  display: none;
+  margin: 0; padding: 14px;
+  max-height: 460px; overflow: auto;
+  font: 400 12px/1.55 var(--mono);
+  color: var(--fg-2);
+  white-space: pre;
+  tab-size: 4;
+}
+.src.is-on { display: block; }
+.src code { color: inherit; font: inherit; }
+
+::selection { background: var(--accent); color: #000; }
