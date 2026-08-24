@@ -25,9 +25,9 @@ import time
 import webbrowser
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-PING_PATH = "/__alive"
+PING_PATH = "/__alive"    # kept in step with the fetch() in web/js/app.js
 IDLE_TIMEOUT = 5.0        # seconds of silence before the server gives up
-POLL = 0.5
+POLL = 0.5                # how often the watchdog checks, in seconds
 
 
 class State:
@@ -50,7 +50,16 @@ class State:
 
 
 def make_handler(state, quiet):
+    """Build the request handler class.
+
+    A factory rather than a plain class because http.server constructs a fresh
+    handler per request and gives us no way to pass anything in: the shared
+    state and the quiet flag have to be closed over instead.
+    """
+
     class Handler(http.server.SimpleHTTPRequestHandler):
+        """Serves web/, with one extra route: PING_PATH, the heartbeat."""
+
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=ROOT, **kw)
 
@@ -98,6 +107,11 @@ def watchdog(state, server, timeout):
 
 
 def main(argv=None):
+    """Start the server, open a browser at it, and wait.
+
+    Returns a process exit code, so the failures below read as `return 1`
+    rather than as exceptions the user has to interpret.
+    """
     ap = argparse.ArgumentParser(description="Serve the cosmos.js planet generator.")
     ap.add_argument("--port", type=int, default=0,
                     help="port to serve on (default: let the OS pick a free one)")

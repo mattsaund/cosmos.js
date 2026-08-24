@@ -4,7 +4,21 @@
    Dark, monospace-forward, deliberately plain. The planet is the
    only thing here meant to draw the eye, so everything around it
    stays flat and quiet.
+
+   IN THIS FILE
+     tokens ..... colours, fonts and the few measurements that more
+                  than one rule depends on
+     header ..... the top bar
+     layout ..... the three-panel grid, and how it folds up narrow
+     controls ... one row per setting, plus the inputs they use
+     preview .... the stage the planet sits in
+     code ....... the tabbed source panes
+
+   No preprocessor and no build step: this file is served exactly as
+   it is written.
    ============================================================ */
+
+/* --- tokens ------------------------------------------------- */
 
 :root {
   /* Black and white, no hue anywhere. The planet is the only thing on the page

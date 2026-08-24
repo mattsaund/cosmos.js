@@ -12,12 +12,17 @@
 </head>
 <body>
 
+<!-- Header: the name and a link back to the repo. Its height is assumed by
+     --bar-h in the stylesheet, which sizes the first row against the window,
+     so anything that grows this bar has to change that too. -->
 <header class="bar">
   <h1>cosmos.js</h1>
   <a class="repo" href="https://github.com/mattsaund/cosmos.js"
      target="_blank" rel="noopener">github.com/mattsaund/cosmos.js</a>
 </header>
 
+<!-- Three panels: controls on the left, preview beside them, generated code
+     across the bottom. The grid that arranges them is in css/app.css. -->
 <main class="app">
 
   <!-- Controls are built by js/app.js from a single spec, so the sliders and
@@ -30,6 +35,9 @@
     </div>
   </section>
 
+  <!-- Preview. #dims reports the glyph grid; "spin" only pauses the angle,
+       it does not stop the animation loop. The planet itself is plain text
+       inside #out, which is the whole idea: no canvas, no images. -->
   <section class="panel preview" aria-label="Preview">
     <div class="panel__head">
       <span id="dims" class="dim">-</span>
@@ -38,6 +46,8 @@
     <div class="stage"><pre id="out" aria-live="off"></pre></div>
   </section>
 
+  <!-- Generated code. Both panes are always filled by app.js; the tabs only
+       decide which one is visible, and which one Copy copies. -->
   <section class="panel code" aria-label="Generated code">
     <div class="panel__head">
       <div class="tabs" role="tablist">
@@ -52,6 +62,9 @@
 
 </main>
 
+<!-- Plain scripts, no module system, so the order is the dependency graph:
+     planet.js defines Cosmos, emit.js defines Emit and reads Cosmos when it
+     runs, and app.js uses both the moment it loads. app.js goes last. -->
 <script src="js/planet.js"></script>
 <script src="js/emit.js"></script>
 <script src="js/app.js"></script>

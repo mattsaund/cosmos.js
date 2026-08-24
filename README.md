@@ -30,12 +30,13 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 
 ## Controls
 
-| **texture**        | rock, cratered, ice, gas giant, lava, desert                       |
+| control            | what it does                                                       |
 | ------------------ | ------------------------------------------------------------------ |
+| **texture**        | rock, cratered, ice, gas giant, lava, desert                       |
 | **resolution**     | glyph rows; columns follow so the disk stays round                 |
 | **size**           | preview font size, in px                                           |
 | **brightness**     | multiplies the shaded result                                       |
-| **night side**     | how much light reaches the dark limb                               |
+| **shadow**         | how much light reaches the dark limb                               |
 | **crater count**   | how many impacts get scattered on the surface                      |
 | **lumpiness**      | 0 is a perfect sphere; wind it up for an asteroid                  |
 | **tilt / roll**    | where the pole points                                              |
@@ -62,6 +63,16 @@ web/js/emit.js turns a config into standalone Python or JavaScript
 web/js/app.js controls, preview loop, code panes, launcher heartbeat
 web/css/app.css chrome
 ```
+
+## Contributer Rules and Procedures
+
+**AI Policy**
+
+I am open to AI and agentic coding, but the code written needs to follow specific guidelines:
+1. MUST be human readable, acceptable variable/function names.
+2. easily tracable, following a good program flow
+3. Contributer MUST look at/document code and code changes. you need to understand the code that is being written.
+
 ## Credits
 
 Matthew Saunders: [msaunders.dev](https://msaunders.dev).

@@ -10,9 +10,57 @@
    what the preview shows.
 
    Pure computation: nothing in this file touches the DOM.
+
+   ------------------------------------------------------------
+   HOW A FRAME HAPPENS
+
+     build(cfg)     Run once, when a setting changes. Scatters the
+                    craters, fractures and lumps out of the seed,
+                    measures how much sky the body needs, and picks
+                    a column count that keeps the disk round.
+                    Hands back a "body": everything render() needs.
+
+     render(b, a)   Run once per animation frame, at spin angle a.
+                    For every glyph in the grid: fire a ray, find
+                    where it meets the surface, light that point,
+                    ask the texture how bright the ground is there,
+                    composite the rings over it, and round the
+                    answer onto a character.
+
+   THE THREE SPACES
+   Every x/y/z below lives in one of these, and mixing them up is
+   the easiest way to break this file.
+
+     screen  sx, sy      the glyph grid, measured in body radii.
+                         sx runs right, sy runs up, centre is 0, 0.
+     view    x, y, z     the camera's frame: +z points at you, so
+                         the light and the silhouette live here.
+     body    bx, by, bz  bolted to the planet, so it turns and they
+                         do not. Craters are stored here, which is
+                         exactly why they rotate with the surface
+                         instead of sliding across it.
+
+   NAMES THAT KEEP COMING BACK
+     b            a built body, i.e. whatever build() returned
+     cfg / c      the settings object
+     la, lo       latitude and longitude on the body, in radians
+     nx, ny, nz   the spin axis, in view space
+     u*, v*       two axes across the equator, square to that axis
+     d            almost always a dot product
+
+   IN THIS FILE
+     ramp and aspect .. the characters, and the shape of a text cell
+     small maths ...... clamp, unit, rng
+     scatter .......... seed -> craters, fractures, lumps
+     textures ......... six surfaces, one albedo function each
+     config ........... defaults() and build()
+     shape ............ radius(), what makes a body non-spherical
+     render ........... the per-glyph loop
    ============================================================ */
 var Cosmos = (function () {
   'use strict';
+
+  /* --- ramp and aspect -------------------------------------- */
 
   /* Bourke's 10-level ramp. Ink density rises monotonically, which the
      obvious-looking ".,:;=+ic*ox%#@" does not: 'i' and 'c' read lighter than
@@ -27,11 +75,19 @@ var Cosmos = (function () {
      measures the real one at boot and calls setAspect. */
   var CHAR_ASPECT = 0.6;
 
+  /* Called by the app once it has measured the font the browser actually
+     resolved. Ratios outside the range any real monospace font occupies are
+     dropped on the floor: a probe taken before the font has loaded can report
+     nonsense, and a bad ratio here surfaces as a badly stretched planet rather
+     than as an error anyone would notice. */
   function setAspect(v) { if (v > 0.2 && v < 1.2) CHAR_ASPECT = v; }
 
   /* --- small maths ---------------------------------------- */
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
+  /* Scale a vector to length 1. The `|| 1` is a guard, not a rounding trick:
+     without it a zero-length vector turns the whole frame into NaN, which
+     draws as a solid block of one character. */
   function unit(x, y, z) {
     var m = Math.sqrt(x * x + y * y + z * z) || 1;
     return [x / m, y / m, z / m];
@@ -48,8 +104,26 @@ var Cosmos = (function () {
     };
   }
 
-  /* Surface features as body-frame unit vectors plus a cosine radius, so a
-     texture lookup is a dot product rather than inverse trig per glyph. */
+  /* --- scatter: seed -> surface features -------------------- *
+     Three ways of sprinkling something over a sphere, all drawing on the same
+     seeded PRNG, so the same seed always gives back the same planet. Each
+     returns a plain array that the textures (or radius()) then read once per
+     glyph, which is why the shapes below are chosen for cheap lookups rather
+     than for being pleasant to read. */
+
+  /* Round patches: craters, maria, hot pools. Each one is
+
+       x, y, z   unit vector from the centre of the body to the middle of the
+                 patch, in body space
+       c         cos(radius), so testing a point costs one dot product:
+                 dot > c means the point is inside the patch
+       rim       cos(radius * 0.7), the same test for the inner 70%. So a point
+                 with dot > c but dot < rim is in the outer third: the wall of
+                 a crater, and the reason craters read as craters at all.
+
+     Mind the sense of it. A BIGGER dot product means CLOSER to the middle of
+     the patch, so the comparisons over in the textures look inside out until
+     that clicks. */
   function features(seed, n, rMin, rSpan) {
     var r = rng(seed), out = [], i;
     for (i = 0; i < n; i++) {
@@ -65,9 +139,12 @@ var Cosmos = (function () {
     return out;
   }
 
-  /* A plane through the centre cuts the sphere in a great circle, so
+  /* Lines that go all the way round: fractures on ice, fissures on lava.
+
+     A plane through the centre cuts the sphere in a great circle, so
      |dot(p, n)| is the angular distance from that line. Gives a feature that
-     wraps the whole body, which no blob can do. */
+     wraps the whole body, which no blob can do. `w` is the half-width in those
+     same units, so a point is on the line when |dot| < w. */
   function circles(seed, n, wMin, wSpan) {
     var r = rng(seed), out = [], i;
     for (i = 0; i < n; i++) {
@@ -83,7 +160,9 @@ var Cosmos = (function () {
   }
 
   /* Lobes for an irregular body. Amplitudes are signed so the shape dents as
-     well as bulges. */
+     well as bulges. Unlike the two above, these are not read by the textures:
+     radius() uses them to move the surface itself, and `a` is how far, in body
+     radii. */
   function lobes(seed, n, aMin, aSpan, negChance) {
     var r = rng(seed), out = [], i;
     for (i = 0; i < n; i++) {
@@ -99,12 +178,24 @@ var Cosmos = (function () {
   }
 
   /* --- textures -------------------------------------------- *
+     The colour of the ground, before any light reaches it.
+
      Each takes a body-frame unit vector plus the latitude and longitude
-     already derived from it, and returns an albedo around 1.0. Anything
-     under ~0.14 rad across lands inside a single glyph and reads as noise
-     rather than as a feature, which is what sets the floors below. */
+     already derived from it, and returns an albedo around 1.0, where 1.0 is
+     plain grey ground; render() multiplies the lighting by whatever comes
+     back. Anything under ~0.14 rad across lands inside a single glyph and
+     reads as noise rather than as a feature, which is what sets the floors
+     below.
+
+     The clamp at the end of each one is not tidying up. Enough overlapping
+     features will push the albedo negative or well past the top of the ramp,
+     and either of those comes out as a flat slab of a single character.
+
+     Adding a texture means adding it in five other places as well; the
+     checklist is at the top of emit.js. */
 
   var TEXTURES = {
+    /* A moon: dark plains with bright-rimmed craters punched through them. */
     cratered: function (b, bx, by, bz, la, lo) {
       var a = 0.86, i, c, d;
       for (i = 0; i < b.maria.length; i++) {
@@ -120,6 +211,7 @@ var Cosmos = (function () {
       return clamp(a, 0.12, 1.12);
     },
 
+    /* An icy moon: bright, fractured, with dark chaos terrain between. */
     ice: function (b, bx, by, bz, la, lo) {
       var a = 1.00, i, c, d;
       for (i = 0; i < b.maria.length; i++) {          // chaos terrain
@@ -142,6 +234,7 @@ var Cosmos = (function () {
       return clamp(a, 0.10, 1.22);
     },
 
+    /* A banded giant, with one long-lived storm below the equator. */
     gas: function (b, bx, by, bz, la, lo) {
       /* Latitude bands alone are rotation-invariant: the body would turn and
          look completely still. The longitudinal terms are what make the spin
@@ -156,6 +249,7 @@ var Cosmos = (function () {
       return clamp(a, 0.12, 1.15);
     },
 
+    /* A dry world: soft dune tones, dark basins, bright polar caps. */
     desert: function (b, bx, by, bz, la, lo) {
       var a = 0.78 + 0.09 * Math.sin(lo * 3.4 + la * 2.1)
                    + 0.06 * Math.sin(la * 6.3 - lo * 1.7);
@@ -169,6 +263,7 @@ var Cosmos = (function () {
       return clamp(a, 0.15, 1.20);
     },
 
+    /* Mostly dark crust, lit from within along the fissures. */
     lava: function (b, bx, by, bz, la, lo) {
       var a = 0.26, i, c, d;
       for (i = 0; i < b.cracks.length; i++) {         // glowing fissures
@@ -185,6 +280,8 @@ var Cosmos = (function () {
       return clamp(a, 0.05, 1.30);
     },
 
+    /* A plain rocky body: gently mottled, lightly cratered. The default
+       fallback, and the quietest of the six. */
     rock: function (b, bx, by, bz, la, lo) {
       var a = 0.72 + 0.10 * Math.sin(lo * 6.0 + la * 4.0)
                    + 0.06 * Math.sin(lo * 13.0 - la * 7.0);
@@ -196,6 +293,9 @@ var Cosmos = (function () {
     }
   };
 
+  /* Fold an angle back into -pi..pi. Longitude wraps, so the distance to the
+     storm above has to be measured across the seam rather than the long way
+     round the planet. */
   function wrapPi(x) {
     while (x > Math.PI) x -= 2 * Math.PI;
     while (x < -Math.PI) x += 2 * Math.PI;
@@ -203,6 +303,10 @@ var Cosmos = (function () {
   }
 
   /* --- config ---------------------------------------------- */
+
+  /* The opening planet, and the complete list of settings the renderer
+     honours. app.js builds its sliders against these keys and emit.js reads
+     the same object, so a new setting starts here and nowhere else. */
   function defaults() {
     return {
       texture:   'cratered',
@@ -225,7 +329,20 @@ var Cosmos = (function () {
   }
 
   /* Everything derived from a config once, so the per-glyph loop below never
-     allocates or re-seeds. Call this when settings change, not per frame. */
+     allocates or re-seeds. Call this when settings change, not per frame.
+
+     What comes back, and who reads it:
+
+       tex, amb, gain             the shading; read at every glyph
+       rows, cols                 the size of the character grid
+       extX, extY                 how much sky the frame covers, in body radii
+       max                        bounding radius, for the ray search
+       rock                       true if the body is lumpy enough to need
+                                  that search at all
+       craters, maria, cracks     feature tables, read by the textures
+       shape, facets, knobs       deformation lobes, read by radius()
+       elong                      how far the body is stretched along bx
+       rings                      ring geometry, or null */
   function build(cfg) {
     var c = cfg || defaults();
     var lump = c.lumpiness || 0;
@@ -240,6 +357,10 @@ var Cosmos = (function () {
       rock:    lump > 0.001,
       craters: features(c.seed, Math.max(0, Math.round(c.craters)), 0.15, 0.20),
       maria:   features(c.seed ^ 0x9E3779B9, 5, 0.40, 0.26),
+      /* Note: cracks and shape below are derived from the same constant, so on
+         a lumpy ice body the first fracture and the first lobe point the same
+         way. Worth knowing before trusting them to be independent. Changing it
+         would repaint every planet anyone has already saved a seed for. */
       cracks:  circles(c.seed ^ 0x51F0AA, 8, 0.046, 0.042),
       rings:   c.rings ? { inner: c.ringInner, outer: c.ringOuter,
                            gaps: [[1.68, 1.78], [2.04, 2.09]] } : null
@@ -292,11 +413,16 @@ var Cosmos = (function () {
     return b;
   }
 
-  /* Direction-varying radius. The lobes live in BODY space, which is the whole
-     point: rotating the body rotates the lumps, and that is what makes an
-     asteroid read as an asteroid rather than a sphere wearing a moving
-     texture. Powers are done by multiplication; Math.pow here would run a
-     million times per redraw. */
+  /* --- shape ----------------------------------------------- */
+
+  /* Direction-varying radius: how far the surface sits from the centre when
+     looking in direction (bx, by, bz). 1 is a sphere, and a smooth body short
+     circuits to exactly that.
+
+     The lobes live in BODY space, which is the whole point: rotating the body
+     rotates the lumps, and that is what makes an asteroid read as an asteroid
+     rather than a sphere wearing a moving texture. Powers are done by
+     multiplication; Math.pow here would run a million times per redraw. */
   function radius(b, bx, by, bz) {
     if (!b.rock) return 1;
     var r = 1 + b.elong * (bx * bx - 0.34);
@@ -316,18 +442,35 @@ var Cosmos = (function () {
     return r;
   }
 
+  /* One fixed light, in VIEW space, so it stays put while the body turns
+     under it. emit.js bakes these three numbers into both exports, so there is
+     one definition of the light rather than three. */
   var LIGHT = unit(-0.60, 0.40, 0.69);   // key light, upper left, toward viewer
 
   /* --- render ---------------------------------------------- */
+
+  /* One frame of body `b`, turned to `angle` radians. Comes back as rows of
+     glyphs joined by newlines, with no trailing newline: exactly what a <pre>
+     wants. Nothing is kept between calls apart from the body itself, so frames
+     can be drawn in any order, which is what makes scrubbing and the --once
+     exports work.
+
+     The whole function is one pass over the grid. Everything before the loop
+     is setup that would otherwise be recomputed at every glyph. */
   function render(b, angle) {
     var W = b.cols, H = b.rows, extX = b.extX, extY = b.extY;
     var lastIdx = RAMP.length - 1;
 
-    /* Body axis in view space. */
+    /* Setup 1: the spin axis, in view space. Tilt leans the pole toward or
+       away from the viewer; roll turns it within the plane of the screen. */
     var ct = Math.cos(b.tilt), st = Math.sin(b.tilt);
     var nx = -Math.sin(b.roll) * ct, ny = Math.cos(b.roll) * ct, nz = st;
 
-    /* Orthonormal equatorial basis perpendicular to that axis. */
+    /* Setup 2: two more axes to finish the frame, both lying across the
+       equator. h is any direction that is not parallel to the axis, and the
+       cross products turn it into a clean perpendicular pair. The swap when
+       the axis is near +z is that "not parallel" clause earning its keep:
+       crossing a vector with itself leaves nothing to normalise. */
     var hx = 0, hy = 0, hz = 1;
     if (Math.abs(nz) > 0.9) { hx = 1; hz = 0; }
     var ux = hy * nz - hz * ny, uy = hz * nx - hx * nz, uz = hx * ny - hy * nx;
@@ -335,11 +478,17 @@ var Cosmos = (function () {
     ux /= um; uy /= um; uz /= um;
     var vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
 
+    /* Setup 3: everything else the inner loop would otherwise re-read. */
     var ca = Math.cos(angle), sa = Math.sin(angle);
     var lx = LIGHT[0], ly = LIGHT[1], lz = LIGHT[2];
     var rings = b.rings, gaps = rings ? rings.gaps : null;
 
-    /* Scratch rather than a returned array: this runs once per bisection step
+    /* View space -> body space, and the single busiest function in the
+       project. It writes the direction into _bx/_by/_bz and RETURNS the
+       distance from the centre, because the ray search needs both and handing
+       back a pair would allocate an object per bisection step.
+
+       Scratch rather than a returned array: this runs once per bisection step
        per cell, and allocating there would be all GC and no work. */
     var _bx = 0, _by = 0, _bz = 0;
     function toBody(px, py, pz) {
@@ -353,6 +502,9 @@ var Cosmos = (function () {
       return L;
     }
 
+    /* One pass over the grid. Rows run down the screen but up the frame, hence
+       the 1 - ... in sy; the + 0.5 aims the ray at the middle of the cell
+       rather than its corner. */
     var out = new Array(H), i, j;
     for (j = 0; j < H; j++) {
       var line = new Array(W);
@@ -360,9 +512,12 @@ var Cosmos = (function () {
 
       for (i = 0; i < W; i++) {
         var sx = (2 * (i + 0.5) / W - 1) * extX;
-        var d2 = sx * sx + sy * sy;
+        var d2 = sx * sx + sy * sy;    // squared distance from the centre
 
-        /* ---- lit surface ---- */
+        /* ---- lit surface ----
+           How far along the ray the body is, if it is there at all. zs is that
+           depth, and -1e9 stands in for "nothing here", so the ring test
+           further down can compare against it without a special case. */
         var sphere = -1, zs = -1e9, hit = false;
         if (b.rock) {
           /* Bisect down the ray: hi starts outside the bounding sphere, lo at
@@ -389,9 +544,16 @@ var Cosmos = (function () {
           var Lp = toBody(sx, sy, zs);
           var nzv = zs / Lp;                        // cosine of the view angle
           var lum = (sx / Lp) * lx + (sy / Lp) * ly + nzv * lz;
-          if (lum < 0) lum = 0;
+          if (lum < 0) lum = 0;                     // turned away from the light
+          /* Rounding can hand back 1.0000000001 for a unit vector, and asin of
+             that is NaN, which paints as a hole in the planet. */
           var by = clamp(_by, -1, 1);
           var alb = b.tex(b, _bx, by, _bz, Math.asin(by), Math.atan2(_bz, _bx));
+          /* Lambert, softened. Straight cosine falls off far too fast for ten
+             shades: the terminator lands inside two or three characters and
+             the body reads as a paper cut-out. The (0.45 + 0.55 * lum) term
+             pulls the midtones apart again so the ramp has something to spend
+             its steps on. */
           sphere = alb * (b.amb + (1 - b.amb) * lum * (0.45 + 0.55 * lum));
           sphere *= (0.58 + 0.42 * nzv) * b.gain;   // limb darkening
         }
@@ -400,6 +562,8 @@ var Cosmos = (function () {
            A translucent sheet, not a solid surface: a faint band crossing in
            front of the planet has to composite over it, not replace it. */
         var ringLum = 0, cov = 0, zr = -1e9;
+        /* Rings seen dead edge-on are a plane containing the viewer: there is
+           no sheet left to hit, and the division below would blow up. Skip. */
         if (rings && Math.abs(nz) > 0.05) {
           zr = -(nx * sx + ny * sy) / nz;
           var rr = Math.sqrt(d2 + zr * zr);
@@ -434,11 +598,18 @@ var Cosmos = (function () {
           }
         }
 
-        /* ---- depth resolve ---- */
+        /* ---- depth resolve ----
+           Only two things can be under this glyph, and the ring wins when
+           there is ring here at all and it is not hiding behind the planet.
+           Even then it lets the surface through, in proportion to how thin the
+           ring happens to be at that radius. */
         var back = sphere >= 0 ? sphere : 0;
         var v = (cov > 0 && (d2 > 1 || zr > zs))
               ? ringLum * cov + back * (1 - cov)
               : back;
+        /* And this is the line the whole file exists for: a brightness in
+           0..1 becomes one of ten characters. Index 0 is a space, so empty sky
+           falls out of the same expression. */
         line[i] = RAMP.charAt(Math.round(clamp(v, 0, 1) * lastIdx));
       }
       out[j] = line.join('');
@@ -446,6 +617,10 @@ var Cosmos = (function () {
     return out.join('\n');
   }
 
+  /* What the rest of the app can see. RAMP and LIGHT are out here because
+     emit.js bakes them into the generated source: one definition, three
+     programs. TEXTURES is exposed so the six names can be listed without
+     hard-coding them somewhere else. */
   return {
     RAMP: RAMP,
     LIGHT: LIGHT,

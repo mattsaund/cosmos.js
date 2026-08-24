@@ -7,9 +7,45 @@
    config key it writes. Adding a knob means adding one entry here,
    not touching the HTML, the render call and the exporters
    separately and hoping they agree.
+
+   ------------------------------------------------------------
+   WHAT HAPPENS WHEN A SLIDER MOVES
+
+     the control's handler writes cfg[key]
+       -> sync()       pushes cfg back out to every control: the
+                       readouts, the rows that hide themselves, any
+                       value it had to nudge to stay sensible
+       -> rebuild()    body = Cosmos.build(cfg), then:
+            paint()    draw one frame into the <pre>
+            code()     re-emit both source panes
+
+   Size and colour skip rebuild(): they change how a frame is
+   painted, not what is in it. They carry `preview: true` in SPEC.
+
+   Running alongside all of that, tick() sits on
+   requestAnimationFrame forever, moves the angle on by however much
+   real time has passed, and calls paint().
+
+   cfg is the single source of truth. Everything on the page is
+   derived from it, never the other way round, which is why sync()
+   only ever pushes outward.
+
+   IN THIS FILE
+     font probe ...... measures the glyph shape the browser picked
+     SPEC ............ every control, as one list of data
+     build ........... turns SPEC into DOM
+     sync ............ cfg -> controls
+     render loop ..... rebuild / fitSize / paint / tick
+     code panes ...... emit, tab switching, copy
+     buttons ......... randomize and reset
+     console hook .... window.__cosmos
+     handshake ....... the ping that keeps cosmos.py alive
+     go .............. first paint
    ============================================================ */
 (function () {
   'use strict';
+
+  /* --- font probe ------------------------------------------- */
 
   /* Which monospace font resolves decides the glyph's advance, and the disk is
      only round if the column count is derived from the real one. Measure it
@@ -28,9 +64,19 @@
   var cfg = Cosmos.defaults();
   var body = Cosmos.build(cfg);
 
-  /* type:  range | select | check | color | seg | number
-     key:   the cfg property it writes
-     fmt:   how the current value reads out beside the label      */
+  /* --- SPEC: every control, as data ------------------------- *
+     In page order. One entry is one row of the controls panel.
+
+       key       the cfg property it writes; also what `when` refers to
+       name      the label
+       type      range | select | check | color | seg | number
+       fmt       how the value reads out beside the label (default: 2dp)
+       invert    the slider runs backwards against the value it writes
+       preview   cheap: repaint, but do not rebuild the body
+       when      only show this row while cfg[when] is truthy
+
+     Adding a knob is one entry here plus one key in Cosmos.defaults().
+     Nothing else in this file has to learn about it. */
   var SPEC = [
     { key: 'texture', name: 'texture', type: 'select', options: [
         ['rock', 'rock'], ['cratered', 'cratered'], ['ice', 'ice'],
@@ -38,8 +84,9 @@
       ] },
     { key: 'rows', name: 'resolution', type: 'range', min: 10, max: 70, step: 1,
       fmt: function (v) { return Math.round(v) + ' rows'; } },
-    /* Whole points only: tk font sizes are integers, so a half-point step is
-       something the desktop build cannot draw. */
+    /* Whole pixels only. The preview scales the type down whenever the body
+       will not fit the stage anyway (see fitSize), so a half-pixel step on the
+       slider buys nothing but a fussier readout. */
     { key: 'size', name: 'size', type: 'range', min: 5, max: 26, step: 1,
       fmt: function (v) { return Math.round(v) + ' px'; }, preview: true },
     { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 1.8, step: 0.01 },
@@ -85,9 +132,15 @@
   var stage = document.querySelector('.stage');
   var dims = document.getElementById('dims');
   var spin = document.getElementById('spin');
+  /* key -> { input, val, wrap, spec }, filled in as the controls are built, so
+     sync() can find every piece of a row again without another DOM query. */
   var nodes = {};
 
-  /* --- build the controls ---------------------------------- */
+  /* --- build the controls ----------------------------------- *
+     One pass over SPEC, building each row as: a label line with the name and
+     the live readout, then whatever input the type calls for, then the
+     listener that writes back into cfg. The handlers differ only in which
+     event they listen for and how much work the change costs. */
   SPEC.forEach(function (c) {
     var wrap = document.createElement('div');
     wrap.className = 'ctl';
@@ -179,7 +232,12 @@
     host.appendChild(wrap);
   });
 
-  /* --- state -> controls ----------------------------------- */
+  /* --- state -> controls ------------------------------------ */
+
+  /* Make the page agree with cfg. One way only: cfg is the truth. Called after
+     anything that changes it, including the changes that come from code rather
+     than from a control - Randomize, Reset, the console hook - which is why it
+     rewrites every row rather than just the one that moved. */
   function sync() {
     SPEC.forEach(function (c) {
       var nd = nodes[c.key], v = cfg[c.key];
@@ -213,9 +271,14 @@
     }
   }
 
-  /* --- render loop ----------------------------------------- */
-  var angle = 0, last = 0;
+  /* --- render loop ------------------------------------------ */
+  var angle = 0;    // how far the body has turned, in radians
+  var last = 0;     // timestamp of the previous frame; 0 while paused
 
+  /* Re-derive the body from cfg, then repaint and re-emit. The expensive path:
+     it re-scatters every feature and, for a lumpy body, re-measures the
+     bounding radius over 800 directions. Fine on a slider drag, but that is
+     why the cheap settings are allowed to skip it. */
   function rebuild() {
     body = Cosmos.build(cfg);
     paint();
@@ -241,6 +304,8 @@
     return Math.max(2, Math.min(cfg.size, byWidth, byHeight));
   }
 
+  /* Draw the body at the current angle into the <pre>, and update the readout
+     beside it. Cheap enough to run every animation frame. */
   function paint() {
     var fs = fitSize();
     out.style.fontSize = fs.toFixed(2) + 'px';
@@ -250,6 +315,12 @@
                      + (fs < cfg.size - 0.05 ? '   fitted to ' + fs.toFixed(1) + 'px' : '');
   }
 
+  /* The animation loop, running whether or not the planet is spinning.
+
+     The angle advances by real elapsed time rather than a fixed step, so a
+     slow frame does not slow the planet down. Clearing `last` while paused is
+     what stops it lurching forward by the whole pause the moment spin comes
+     back on. */
   function tick(now) {
     requestAnimationFrame(tick);
     if (!spin.checked) { last = now; return; }
@@ -261,13 +332,17 @@
   /* --- code panes ------------------------------------------ */
   var panes = { py: document.querySelector('#pane-py code'),
                 js: document.querySelector('#pane-js code') };
-  var current = 'py';
+  var current = 'py';   // which tab is showing, and so what Copy will copy
 
+  /* Both panes every time, not just the visible one. Emitting is a millisecond
+     or two and doing both here keeps switching tabs instant. */
   function code() {
     panes.py.textContent = Emit.python(cfg, body);
     panes.js.textContent = Emit.javascript(cfg, body);
   }
 
+  /* Tab switching, which is only ever a class on the tab and a class on the
+     pane it names. The panes are both already up to date. */
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
     t.addEventListener('click', function () {
       current = t.dataset.pane;
@@ -279,6 +354,7 @@
     });
   });
 
+  /* --- copy ------------------------------------------------- */
   var copyBtn = document.getElementById('copy');
   copyBtn.addEventListener('click', function () {
     var text = panes[current].textContent;
@@ -306,6 +382,11 @@
   });
 
   /* --- buttons --------------------------------------------- */
+  /* A whole planet at once. The ranges are hand-picked rather than the full
+     travel of each slider: the point is that every roll looks like a body
+     somebody might have designed on purpose. Hence lumpiness going high only
+     for rock, and a ringed planet being given a minimum tilt - rings seen
+     exactly edge-on are a single line of glyphs. */
   document.getElementById('randomize').addEventListener('click', function () {
     var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
     var r = function (lo, hi) { return lo + Math.random() * (hi - lo); };
@@ -350,13 +431,19 @@
     return '#' + hex(f(h + 1 / 3)) + hex(f(h)) + hex(f(h - 1 / 3));
   }
 
+  /* Back to the defaults, opening extremes and all. */
   document.getElementById('reset').addEventListener('click', function () {
     cfg = startExtremes(Cosmos.defaults());
     sync(); rebuild();
   });
 
-  /* Exposed so the renderer can be driven from the console, and so the
-     equivalence test can render a known config without the UI. */
+  /* --- console hook ----------------------------------------- *
+     Exposed so the renderer can be driven from the console, and so the
+     equivalence test can render a known config without the UI. From devtools:
+
+       __cosmos.set({ texture: 'lava', lumpiness: 0.8 })   apply and redraw
+       __cosmos.frame(1.2)                                 one frame, as text
+       __cosmos.body()                                     what build() made */
   window.__cosmos = {
     get cfg() { return cfg; },
     set: function (patch) {
@@ -392,12 +479,18 @@
     } catch (e) { /* no fetch: the launcher falls back to its own timeout */ }
   }
 
+  /* --- resize ----------------------------------------------- */
+
+  /* fitSize() measures the stage, so a resized window needs a repaint.
+     Debounced because a drag fires this continuously and each repaint is a
+     full re-render of every glyph. */
   var refit;
   window.addEventListener('resize', function () {
     clearTimeout(refit);
     refit = setTimeout(paint, 100);
   });
 
+  /* --- go --------------------------------------------------- */
   sync();
   rebuild();
   requestAnimationFrame(tick);
