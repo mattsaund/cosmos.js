@@ -210,6 +210,10 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 
 .row { display: flex; gap: 8px; margin-top: 14px; }
 .row button { flex: 1; }
+/* A row carrying one button, which reads better sitting at its own width than
+   stretched the whole way across the panel. */
+.row--center { justify-content: center; }
+.row--center button { flex: 0 0 auto; }
 .dim { color: var(--fg-3); }
 
 /* --- preview -------------------------------------------------

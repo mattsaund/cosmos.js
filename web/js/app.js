@@ -36,7 +36,8 @@
      build ........... turns SPEC into DOM
      sync ............ cfg -> controls
      render loop ..... rebuild / fitSize / paint / tick
-     code panes ...... emit, tab switching, copy
+     code panes ...... emit and tab switching
+     copy ............ the clipboard helper, shared by both buttons
      buttons ......... randomize and reset
      console hook .... window.__cosmos
      handshake ....... the ping that keeps cosmos.py alive
@@ -355,16 +356,20 @@
   });
 
   /* --- copy ------------------------------------------------- */
-  var copyBtn = document.getElementById('copy');
-  copyBtn.addEventListener('click', function () {
-    var text = panes[current].textContent;
+
+  /* Put `text` on the clipboard, then flash `btn` to say it worked and set it
+     back to `label` afterwards. Both copy buttons come through here: Copy in
+     the code panel head, which takes whichever source pane is on show, and
+     Copy planet under the controls, which takes the art.
+
+     navigator.clipboard needs a secure context, and this tool is meant to work
+     opened straight off the disk over file://. Fall back to a scratch textarea
+     and execCommand, which does not care. */
+  function copyToClipboard(text, btn, label) {
     var done = function () {
-      copyBtn.textContent = 'Copied';
-      setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1200);
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = label; }, 1200);
     };
-    /* navigator.clipboard needs a secure context, and this tool is meant to
-       work opened straight off the disk over file://. Fall back to a scratch
-       textarea and execCommand, which does not care. */
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done, fallback);
     } else {
@@ -379,6 +384,21 @@
       try { document.execCommand('copy'); done(); } catch (e) { /* nothing to do */ }
       document.body.removeChild(ta);
     }
+  }
+
+  var copyBtn = document.getElementById('copy');
+  copyBtn.addEventListener('click', function () {
+    copyToClipboard(panes[current].textContent, copyBtn, 'Copy');
+  });
+
+  /* The planet as plain text, read back out of the <pre> rather than rendered
+     again. That way what lands on the clipboard is the exact frame that was on
+     screen when the button went down, not one a few milliseconds further round.
+     Cosmos.render joins its rows with newlines and leaves no trailing one, so
+     this pastes into a text document as it stands. */
+  var artBtn = document.getElementById('copy-art');
+  artBtn.addEventListener('click', function () {
+    copyToClipboard(out.textContent, artBtn, 'Copy planet');
   });
 
   /* --- buttons --------------------------------------------- */
