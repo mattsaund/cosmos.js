@@ -35,7 +35,7 @@
      SPEC ............ every control, as one list of data
      build ........... turns SPEC into DOM
      sync ............ cfg -> controls
-     render loop ..... rebuild / fitSize / paint / tick
+     render loop ..... rebuild / sizing / paint / tick
      code panes ...... emit and tab switching
      copy ............ the clipboard helper, shared by both buttons
      buttons ......... randomize and reset
@@ -80,15 +80,17 @@
      Nothing else in this file has to learn about it. */
   var SPEC = [
     { key: 'texture', name: 'texture', type: 'select', options: [
-        ['rock', 'rock'], ['cratered', 'cratered'], ['ice', 'ice'],
+        ['rock', 'rock'], ['ice', 'ice'],
         ['gas', 'gas giant'], ['lava', 'lava'], ['desert', 'desert']
       ] },
-    { key: 'rows', name: 'resolution', type: 'range', min: 10, max: 70, step: 1,
+    { key: 'rows', name: 'resolution', type: 'range', min: 10, max: 100, step: 1,
       fmt: function (v) { return Math.round(v) + ' rows'; } },
-    /* Whole pixels only. The preview scales the type down whenever the body
-       will not fit the stage anyway (see fitSize), so a half-pixel step on the
-       slider buys nothing but a fussier readout. */
-    { key: 'size', name: 'size', type: 'range', min: 5, max: 26, step: 1,
+    /* Whole pixels only: a half-pixel step buys nothing but a fussier readout.
+
+       The max here is only what the slider opens with. retuneSize() replaces it
+       with the largest type this body can be drawn at and still fit the stage,
+       which moves with the resolution and with the window. */
+    { key: 'size', name: 'font size', type: 'range', min: 5, max: 26, step: 1,
       fmt: function (v) { return Math.round(v) + ' px'; }, preview: true },
     { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 1.8, step: 0.01 },
     /* Writes ambient light, but reads as its opposite: more shadow is less
@@ -282,27 +284,55 @@
      why the cheap settings are allowed to skip it. */
   function rebuild() {
     body = Cosmos.build(cfg);
+    retuneSize();     // a different grid tops out at a different font size
     paint();
     code();
   }
 
-  /* The largest type this body can be drawn at and still fit the stage whole.
+  /* The largest whole-pixel type this body can be drawn at and still fit the
+     stage whole. 0 means the panel has not been laid out yet, so there is
+     nothing to measure and nothing to say about it.
 
      A wide ring system needs a frame several times the planet's own width, so
      at anything but a small size the art is wider than the panel. Clipping it
      was bad on its own, and a centred overflow is worse than a plain one: what
      spills past the top and left edges cannot be scrolled to at all, so the
-     planet simply hung off an invisible box. Capping the painted size instead
-     means the whole body is always on screen, and `size` reads as a preferred
-     maximum rather than a promise. */
-  function fitSize() {
+     planet simply hung off an invisible box. */
+  function maxSize() {
     var cs = getComputedStyle(stage);
     var w = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
     var h = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-    if (!(w > 0 && h > 0)) return cfg.size;      // not laid out yet
-    var byWidth = w / (body.cols * Cosmos.aspect());
-    var byHeight = h / body.rows;
-    return Math.max(2, Math.min(cfg.size, byWidth, byHeight));
+    if (!(w > 0 && h > 0)) return 0;             // not laid out yet
+    return Math.floor(Math.min(w / (body.cols * Cosmos.aspect()), h / body.rows));
+  }
+
+  /* Point the font size slider's right-hand end at that measurement.
+
+     The cap used to be invisible. The slider ran to a fixed 26px, the painted
+     size was quietly held down to whatever fitted, and so past some point in
+     the travel the thumb kept moving and the planet did not. Where that point
+     fell depended on the resolution and on the window, which is a strange thing
+     for a slider to keep to itself: at the top of the resolution range it was a
+     stop or two in from the left. Moving the maximum instead means the far
+     right of the slider is always the biggest the preview can draw, whatever
+     the resolution. */
+  function retuneSize() {
+    var nd = nodes.size, top = maxSize();
+    if (!top) return;
+    top = Math.max(nd.spec.min, top);   // keep the range valid in a tiny window
+    nd.input.max = top;
+    if (cfg.size > top) cfg.size = top;
+    nd.input.value = cfg.size;
+    nd.val.textContent = nd.spec.fmt(cfg.size);
+  }
+
+  /* What paint() actually draws at. With the slider retuned this is cfg.size
+     itself; the floor is the last resort for a window too small to fit the body
+     even at the slider's own minimum, which is the one case left where the
+     readout still has to admit it fitted something down. */
+  function fitSize() {
+    var top = maxSize();
+    return top ? Math.max(2, Math.min(cfg.size, top)) : cfg.size;
   }
 
   /* Draw the body at the current angle into the <pre>, and update the readout
@@ -410,7 +440,7 @@
   document.getElementById('randomize').addEventListener('click', function () {
     var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
     var r = function (lo, hi) { return lo + Math.random() * (hi - lo); };
-    cfg.texture = pick(['rock', 'cratered', 'ice', 'gas', 'lava', 'desert']);
+    cfg.texture = pick(['rock', 'ice', 'gas', 'lava', 'desert']);
     cfg.seed = Math.floor(Math.random() * 1e9);
     cfg.craters = Math.round(r(4, 34));
     cfg.lumpiness = cfg.texture === 'rock' ? r(0.5, 1.2) : (Math.random() < 0.25 ? r(0.1, 0.5) : 0);
@@ -501,13 +531,13 @@
 
   /* --- resize ----------------------------------------------- */
 
-  /* fitSize() measures the stage, so a resized window needs a repaint.
-     Debounced because a drag fires this continuously and each repaint is a
-     full re-render of every glyph. */
+  /* maxSize() measures the stage, so a resized window changes both where the
+     slider tops out and what gets painted. Debounced because a drag fires this
+     continuously and each repaint is a full re-render of every glyph. */
   var refit;
   window.addEventListener('resize', function () {
     clearTimeout(refit);
-    refit = setTimeout(paint, 100);
+    refit = setTimeout(function () { retuneSize(); paint(); }, 100);
   });
 
   /* --- go --------------------------------------------------- */

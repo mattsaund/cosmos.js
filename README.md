@@ -32,9 +32,9 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 
 | control            | what it does                                                       |
 | ------------------ | ------------------------------------------------------------------ |
-| **texture**        | rock, cratered, ice, gas giant, lava, desert                       |
+| **texture**        | rock, ice, gas giant, lava, desert                                 |
 | **resolution**     | glyph rows; columns follow so the disk stays round                 |
-| **size**           | preview font size, in px                                           |
+| **font size**      | preview type size, in px; the top of the slider is the biggest that fits the stage |
 | **brightness**     | multiplies the shaded result                                       |
 | **shadow**         | how much light reaches the dark limb                               |
 | **crater count**   | how many impacts get scattered on the surface                      |
@@ -49,8 +49,7 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 **Randomize** generates a completely random planet. **Reset** sets everything to default
 ## The exports
 
-Both programs allow you to copy raw Python or JavaScript code for the planet you create. You can use this code in any project or website you want. pass the argument `--once` for a single frame. The JavaScript runs in a browser (it appends a `<pre>` and animates) or under Node
-(it prints one frame).
+Both programs allow you to copy raw Python or JavaScript code for the planet you create. You can use this code in any project or website you want. pass the argument `--once` for a single frame. The JavaScript runs in a browser (it appends a `<pre>` and animates) or under Node (it prints one frame).
 
 ## Files
 

@@ -42,6 +42,12 @@
 
    Nothing throws if one is missed. The export simply stops matching
    the preview, and only a careful look at both will say so.
+
+   Removing one is the same six places, plus two that only matter
+   when a name stops existing:
+
+     7. planet.js  defaults().texture     if it was the opening one
+     8. planet.js  build()'s fall-through if it was the fallback
    ============================================================ */
 var Emit = (function () {
   'use strict';
@@ -82,8 +88,8 @@ var Emit = (function () {
     return {
       rock:    (c.lumpiness || 0) > 0.001,
       rings:   !!c.rings,
-      craters: t === 'cratered' || t === 'ice' || t === 'rock' || t === 'lava',
-      maria:   t === 'cratered' || t === 'ice' || t === 'desert',
+      craters: t === 'ice' || t === 'rock' || t === 'lava',
+      maria:   t === 'ice' || t === 'desert',
       cracks:  t === 'ice' || t === 'lava'
     };
   }
@@ -379,22 +385,10 @@ var Emit = (function () {
      a drift shows up only as an export that draws a slightly different planet
      from the one on the screen beside it.
 
-     Note the fall-through: an unknown texture emits rock, where planet.js
-     build() falls back to cratered. Neither is reachable from the UI, which
-     only ever offers the six that exist. */
+     An unknown texture falls through to rock, the same way build() does over
+     in planet.js. Neither is reachable from the UI, which only ever offers the
+     five that exist. */
   function texturePy(kind) {
-    if (kind === 'cratered') return [
-      '    a = 0.86',
-      '    for cx, cy, cz, cc, rim in MARIA:',
-      '        d = bx * cx + by * cy + bz * cz',
-      '        if d > cc:',
-      '            a -= 0.40 * (d - cc) / (1 - cc)',
-      '    for cx, cy, cz, cc, rim in CRATERS:',
-      '        d = bx * cx + by * cy + bz * cz',
-      '        if d > cc:',
-      '            a += 0.22 if d < rim else -0.26   # bright rim, dark floor',
-      '    return min(1.12, max(0.12, a))'
-    ].join('\n');
     if (kind === 'ice') return [
       '    a = 1.00',
       '    for cx, cy, cz, cc, rim in MARIA:              # chaos terrain',
@@ -734,21 +728,9 @@ var Emit = (function () {
     return L.join('\n') + '\n';
   }
 
-  /* The same six again in JavaScript. Same warning as texturePy: this is a
+  /* The same five again in JavaScript. Same warning as texturePy: this is a
      hand-kept copy of TEXTURES in planet.js, not a translation of it. */
   function textureJs(kind) {
-    if (kind === 'cratered') return [
-      '  var a = 0.86, i, c, d;',
-      '  for (i = 0; i < MARIA.length; i++) {',
-      '    c = MARIA[i]; d = bx * c[0] + by * c[1] + bz * c[2];',
-      '    if (d > c[3]) a -= 0.40 * (d - c[3]) / (1 - c[3]);',
-      '  }',
-      '  for (i = 0; i < CRATERS.length; i++) {',
-      '    c = CRATERS[i]; d = bx * c[0] + by * c[1] + bz * c[2];',
-      '    if (d > c[3]) a += (d < c[4]) ? 0.22 : -0.26;   // bright rim, dark floor',
-      '  }',
-      '  return Math.min(1.12, Math.max(0.12, a));'
-    ].join('\n');
     if (kind === 'ice') return [
       '  var a = 1.00, i, c, d;',
       '  for (i = 0; i < MARIA.length; i++) {              // chaos terrain',

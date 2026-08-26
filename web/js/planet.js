@@ -52,7 +52,7 @@
      ramp and aspect .. the characters, and the shape of a text cell
      small maths ...... clamp, unit, rng
      scatter .......... seed -> craters, fractures, lumps
-     textures ......... six surfaces, one albedo function each
+     textures ......... five surfaces, one albedo function each
      config ........... defaults() and build()
      shape ............ radius(), what makes a body non-spherical
      render ........... the per-glyph loop
@@ -195,22 +195,6 @@ var Cosmos = (function () {
      checklist is at the top of emit.js. */
 
   var TEXTURES = {
-    /* A moon: dark plains with bright-rimmed craters punched through them. */
-    cratered: function (b, bx, by, bz, la, lo) {
-      var a = 0.86, i, c, d;
-      for (i = 0; i < b.maria.length; i++) {
-        c = b.maria[i];
-        d = bx * c.x + by * c.y + bz * c.z;
-        if (d > c.c) a -= 0.40 * (d - c.c) / (1 - c.c);
-      }
-      for (i = 0; i < b.craters.length; i++) {
-        c = b.craters[i];
-        d = bx * c.x + by * c.y + bz * c.z;
-        if (d > c.c) a += (d < c.rim) ? 0.22 : -0.26;   // bright rim, dark floor
-      }
-      return clamp(a, 0.12, 1.12);
-    },
-
     /* An icy moon: bright, fractured, with dark chaos terrain between. */
     ice: function (b, bx, by, bz, la, lo) {
       var a = 1.00, i, c, d;
@@ -280,8 +264,10 @@ var Cosmos = (function () {
       return clamp(a, 0.05, 1.30);
     },
 
-    /* A plain rocky body: gently mottled, lightly cratered. The default
-       fallback, and the quietest of the six. */
+    /* A plain rocky body: gently mottled, lightly cratered. The default, the
+       fallback for a name that is not here, and the quietest of the five.
+       Craters are the crater count slider's job on this one, rather than a
+       texture of their own. */
     rock: function (b, bx, by, bz, la, lo) {
       var a = 0.72 + 0.10 * Math.sin(lo * 6.0 + la * 4.0)
                    + 0.06 * Math.sin(lo * 13.0 - la * 7.0);
@@ -309,7 +295,7 @@ var Cosmos = (function () {
      the same object, so a new setting starts here and nowhere else. */
   function defaults() {
     return {
-      texture:   'cratered',
+      texture:   'rock',
       rows:      24,        // glyph rows; columns follow from CHAR_ASPECT
       size:      14,        // preview font size in px, ignored by the maths
       brightness: 1.00,     // multiplies the shaded result
@@ -348,7 +334,7 @@ var Cosmos = (function () {
     var lump = c.lumpiness || 0;
     var b = {
       cfg:     c,
-      tex:     TEXTURES[c.texture] || TEXTURES.cratered,
+      tex:     TEXTURES[c.texture] || TEXTURES.rock,
       rows:    Math.max(6, Math.round(c.rows)),
       amb:     c.ambient,
       gain:    c.brightness,
@@ -619,7 +605,7 @@ var Cosmos = (function () {
 
   /* What the rest of the app can see. RAMP and LIGHT are out here because
      emit.js bakes them into the generated source: one definition, three
-     programs. TEXTURES is exposed so the six names can be listed without
+     programs. TEXTURES is exposed so the five names can be listed without
      hard-coding them somewhere else. */
   return {
     RAMP: RAMP,
