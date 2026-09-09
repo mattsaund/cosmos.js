@@ -19,7 +19,7 @@
             paint()    draw one frame into the <pre>
             code()     re-emit both source panes
 
-   Size and colour skip rebuild(): they change how a frame is
+   Size and color skip rebuild(): they change how a frame is
    painted, not what is in it. They carry `preview: true` in SPEC.
 
    Running alongside all of that, tick() sits on
@@ -69,10 +69,11 @@
      In page order. One entry is one row of the controls panel.
 
        key       the cfg property it writes; also what `when` refers to
-       name      the label
+       name      the row's caption, on the left of the readout
+       label     the words beside the box, for a check
        type      range | select | check | color | seg | number
        fmt       how the value reads out beside the label (default: 2dp)
-       invert    the slider runs backwards against the value it writes
+       invert    the slider runs backward against the value it writes
        preview   cheap: repaint, but do not rebuild the body
        when      only show this row while cfg[when] is truthy
 
@@ -102,12 +103,20 @@
     { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4, step: 0.01 },
     { key: 'tilt', name: 'tilt', type: 'range', min: -1.3, max: 1.3, step: 0.01 },
     { key: 'roll', name: 'roll', type: 'range', min: -1.6, max: 1.6, step: 0.01 },
-    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, step: 0.005 },
-    { key: 'direction', name: 'direction', type: 'seg', options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
-    { key: 'rings', name: 'rings', type: 'check' },
+    { key: 'rings', name: 'rings', type: 'check', label: 'draw a ring system' },
     { key: 'ringInner', name: 'ring inner', type: 'range', min: 1.05, max: 2.4, step: 0.01, when: 'rings' },
     { key: 'ringOuter', name: 'ring outer', type: 'range', min: 1.1, max: 3.2, step: 0.01, when: 'rings' },
-    { key: 'color', name: 'colour', type: 'color', preview: true },
+    /* Preview only. The exports always animate, whatever this says: unchecking
+       it parks the angle where it is, which is what you want while dialing in
+       a texture or lining up a frame to copy. The two controls it hides do
+       reach the exports, so a parked preview still exports a spinning planet
+       at the speed and direction last set here. */
+    { key: 'spin', name: 'spin', type: 'check', label: 'spin the planet', preview: true },
+    { key: 'direction', name: 'direction', type: 'seg', when: 'spin',
+      options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
+    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, step: 0.005,
+      when: 'spin' },
+    { key: 'color', name: 'color', type: 'color', preview: true },
     { key: 'seed', name: 'seed', type: 'number', min: 0, step: 1,
       fmt: function (v) { return String(Math.round(v)); } }
   ];
@@ -134,7 +143,6 @@
   var out = document.getElementById('out');
   var stage = document.querySelector('.stage');
   var dims = document.getElementById('dims');
-  var spin = document.getElementById('spin');
   /* key -> { input, val, wrap, spec }, filled in as the controls are built, so
      sync() can find every piece of a row again without another DOM query. */
   var nodes = {};
@@ -178,7 +186,7 @@
       var lab = document.createElement('label');
       lab.className = 'check';
       lab.appendChild(input);
-      lab.appendChild(document.createTextNode(' draw a ring system'));
+      lab.appendChild(document.createTextNode(' ' + c.label));
       wrap.appendChild(lab);
     } else if (c.type === 'color') {
       input = document.createElement('input');
@@ -211,7 +219,7 @@
       input.addEventListener('input', function () {
         cfg[c.key] = fromSlider(c, Number(input.value));
         sync();
-        /* Size and colour only touch how the preview is painted, so they can
+        /* Size and color only touch how the preview is painted, so they can
            skip rebuilding the body and re-emitting the code. */
         if (c.preview) { paint(); code(); } else rebuild();
       });
@@ -223,7 +231,8 @@
     } else if (c.type === 'check') {
       input.addEventListener('change', function () {
         cfg[c.key] = input.checked;
-        sync(); rebuild();
+        sync();
+        if (c.preview) { paint(); code(); } else rebuild();
       });
     } else if (c.type === 'color') {
       input.addEventListener('input', function () {
@@ -295,7 +304,7 @@
 
      A wide ring system needs a frame several times the planet's own width, so
      at anything but a small size the art is wider than the panel. Clipping it
-     was bad on its own, and a centred overflow is worse than a plain one: what
+     was bad on its own, and a centered overflow is worse than a plain one: what
      spills past the top and left edges cannot be scrolled to at all, so the
      planet simply hung off an invisible box. */
   function maxSize() {
@@ -354,7 +363,7 @@
      back on. */
   function tick(now) {
     requestAnimationFrame(tick);
-    if (!spin.checked) { last = now; return; }
+    if (!cfg.spin) { last = now; return; }
     if (last) angle += (now - last) / 1000 * cfg.speed * cfg.direction;
     last = now;
     paint();
@@ -388,7 +397,7 @@
   /* --- copy ------------------------------------------------- */
 
   /* Put `text` on the clipboard, then flash `btn` to say it worked and set it
-     back to `label` afterwards. Both copy buttons come through here: Copy in
+     back to `label` afterward. Both copy buttons come through here: Copy in
      the code panel head, which takes whichever source pane is on show, and
      Copy planet under the controls, which takes the art.
 

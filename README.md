@@ -2,7 +2,7 @@
 
 An ASCII planet generator for any project you want to have an animated planet. Tune a specific planet with sliders, then copy the generated code into whatever project you want.
 
-Nothing is pre-rendered. Every glyph is a ray cast at a body, shaded from a real lighting model, and quantised onto a density ramp.
+Nothing is pre-rendered. Every glyph is a ray cast at a body, shaded from a real lighting model, and quantized onto a density ramp.
 
 See it here: https://msaunders.dev/cosmos/
 
@@ -43,7 +43,7 @@ There is also a browser build in `web/` with the same controls. Open `web/index.
 | **rotation speed** | radians per second                                                 |
 | **direction**      | clockwise or counterclockwise, as seen with the pole toward you    |
 | **rings**          | draw a ring system, with inner and outer radii                     |
-| **color**          | ink colour, carried into both exports as hex and as an ANSI escape |
+| **color**          | ink color, carried into both exports as hex and as an ANSI escape |
 | **seed**           | which craters, fractures and lumps you get                         |
 
 **Randomize** generates a completely random planet. **Reset** sets everything to default

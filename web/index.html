@@ -12,15 +12,6 @@
 </head>
 <body>
 
-<!-- Header: the name and a link back to the repo. Its height is assumed by
-     --bar-h in the stylesheet, which sizes the first row against the window,
-     so anything that grows this bar has to change that too. -->
-<header class="bar">
-  <h1>cosmos.js</h1>
-  <a class="repo" href="https://github.com/mattsaund/cosmos.js"
-     target="_blank" rel="noopener">github.com/mattsaund/cosmos.js</a>
-</header>
-
 <!-- Three panels: controls on the left, preview beside them, generated code
      across the bottom. The grid that arranges them is in css/app.css. -->
 <main class="app">
@@ -41,13 +32,13 @@
     </div>
   </section>
 
-  <!-- Preview. #dims reports the glyph grid; "spin" only pauses the angle,
-       it does not stop the animation loop. The planet itself is plain text
-       inside #out, which is the whole idea: no canvas, no images. -->
+  <!-- Preview. #dims reports the glyph grid. The planet itself is plain text
+       inside #out, which is the whole idea: no canvas, no images. Spin lives
+       over in the controls now, and only parks the angle: the loop in tick()
+       keeps running either way. -->
   <section class="panel preview" aria-label="Preview">
     <div class="panel__head">
       <span id="dims" class="dim">-</span>
-      <label class="check"><input type="checkbox" id="spin" checked> spin</label>
     </div>
     <div class="stage"><pre id="out" aria-live="off"></pre></div>
   </section>

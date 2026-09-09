@@ -2,8 +2,8 @@
    cosmos.js : ASCII planet renderer
 
    No images and no pre-baked frames. Every glyph is a ray cast at
-   a body, shaded from a real lighting model, and quantised onto a
-   density ramp. The same maths runs three times over in this
+   a body, shaded from a real lighting model, and quantized onto a
+   density ramp. The same math runs three times over in this
    project: here for the live preview, and again in the JavaScript
    and Python that emit.js writes out. Change the algorithm here
    and the emitters have to follow, or the exports stop matching
@@ -32,7 +32,7 @@
    the easiest way to break this file.
 
      screen  sx, sy      the glyph grid, measured in body radii.
-                         sx runs right, sy runs up, centre is 0, 0.
+                         sx runs right, sy runs up, center is 0, 0.
      view    x, y, z     the camera's frame: +z points at you, so
                          the light and the silhouette live here.
      body    bx, by, bz  bolted to the planet, so it turns and they
@@ -50,7 +50,7 @@
 
    IN THIS FILE
      ramp and aspect .. the characters, and the shape of a text cell
-     small maths ...... clamp, unit, rng
+     small math ...... clamp, unit, rng
      scatter .......... seed -> craters, fractures, lumps
      textures ......... five surfaces, one albedo function each
      config ........... defaults() and build()
@@ -82,7 +82,7 @@ var Cosmos = (function () {
      than as an error anyone would notice. */
   function setAspect(v) { if (v > 0.2 && v < 1.2) CHAR_ASPECT = v; }
 
-  /* --- small maths ---------------------------------------- */
+  /* --- small math ---------------------------------------- */
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
   /* Scale a vector to length 1. The `|| 1` is a guard, not a rounding trick:
@@ -113,7 +113,7 @@ var Cosmos = (function () {
 
   /* Round patches: craters, maria, hot pools. Each one is
 
-       x, y, z   unit vector from the centre of the body to the middle of the
+       x, y, z   unit vector from the center of the body to the middle of the
                  patch, in body space
        c         cos(radius), so testing a point costs one dot product:
                  dot > c means the point is inside the patch
@@ -141,7 +141,7 @@ var Cosmos = (function () {
 
   /* Lines that go all the way round: fractures on ice, fissures on lava.
 
-     A plane through the centre cuts the sphere in a great circle, so
+     A plane through the center cuts the sphere in a great circle, so
      |dot(p, n)| is the angular distance from that line. Gives a feature that
      wraps the whole body, which no blob can do. `w` is the half-width in those
      same units, so a point is on the line when |dot| < w. */
@@ -178,11 +178,11 @@ var Cosmos = (function () {
   }
 
   /* --- textures -------------------------------------------- *
-     The colour of the ground, before any light reaches it.
+     The color of the ground, before any light reaches it.
 
      Each takes a body-frame unit vector plus the latitude and longitude
      already derived from it, and returns an albedo around 1.0, where 1.0 is
-     plain grey ground; render() multiplies the lighting by whatever comes
+     plain gray ground; render() multiplies the lighting by whatever comes
      back. Anything under ~0.14 rad across lands inside a single glyph and
      reads as noise rather than as a feature, which is what sets the floors
      below.
@@ -291,16 +291,17 @@ var Cosmos = (function () {
   /* --- config ---------------------------------------------- */
 
   /* The opening planet, and the complete list of settings the renderer
-     honours. app.js builds its sliders against these keys and emit.js reads
+     honors. app.js builds its sliders against these keys and emit.js reads
      the same object, so a new setting starts here and nowhere else. */
   function defaults() {
     return {
       texture:   'rock',
       rows:      24,        // glyph rows; columns follow from CHAR_ASPECT
-      size:      14,        // preview font size in px, ignored by the maths
+      size:      14,        // preview font size in px, ignored by the math
       brightness: 1.00,     // multiplies the shaded result
       ambient:   0.16,      // light on the night side
       craters:   15,
+      spin:      true,      // preview only: parks the angle, ignored by exports
       speed:     0.09,      // radians per second
       direction: 1,         // 1 or -1
       lumpiness: 0.00,      // 0 is a perfect sphere
@@ -353,7 +354,7 @@ var Cosmos = (function () {
     };
 
     /* Three scales of deformation, all generated from the seed. Hand-picking
-       amplitudes was the trap here: one broad lobe well above its neighbours
+       amplitudes was the trap here: one broad lobe well above its neighbors
        reads as a spike rather than as terrain. */
     b.shape  = lobes(c.seed ^ 0x51F0AA, 5,  0.105 * lump, 0.075 * lump, 0.50);
     b.facets = lobes(c.seed ^ 0xA33C17, 14, 0.034 * lump, 0.042 * lump, 0.45);
@@ -401,7 +402,7 @@ var Cosmos = (function () {
 
   /* --- shape ----------------------------------------------- */
 
-  /* Direction-varying radius: how far the surface sits from the centre when
+  /* Direction-varying radius: how far the surface sits from the center when
      looking in direction (bx, by, bz). 1 is a sphere, and a smooth body short
      circuits to exactly that.
 
@@ -456,7 +457,7 @@ var Cosmos = (function () {
        equator. h is any direction that is not parallel to the axis, and the
        cross products turn it into a clean perpendicular pair. The swap when
        the axis is near +z is that "not parallel" clause earning its keep:
-       crossing a vector with itself leaves nothing to normalise. */
+       crossing a vector with itself leaves nothing to normalize. */
     var hx = 0, hy = 0, hz = 1;
     if (Math.abs(nz) > 0.9) { hx = 1; hz = 0; }
     var ux = hy * nz - hz * ny, uy = hz * nx - hx * nz, uz = hx * ny - hy * nx;
@@ -471,7 +472,7 @@ var Cosmos = (function () {
 
     /* View space -> body space, and the single busiest function in the
        project. It writes the direction into _bx/_by/_bz and RETURNS the
-       distance from the centre, because the ray search needs both and handing
+       distance from the center, because the ray search needs both and handing
        back a pair would allocate an object per bisection step.
 
        Scratch rather than a returned array: this runs once per bisection step
@@ -498,7 +499,7 @@ var Cosmos = (function () {
 
       for (i = 0; i < W; i++) {
         var sx = (2 * (i + 0.5) / W - 1) * extX;
-        var d2 = sx * sx + sy * sy;    // squared distance from the centre
+        var d2 = sx * sx + sy * sy;    // squared distance from the center
 
         /* ---- lit surface ----
            How far along the ray the body is, if it is there at all. zs is that

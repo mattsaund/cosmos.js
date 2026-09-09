@@ -165,7 +165,7 @@ var Emit = (function () {
     }
     if (p.cracks) {
       L.push('def circles(seed, count, w_min, w_span):');
-      L.push('    """A plane through the centre cuts the sphere in a great circle, so');
+      L.push('    """A plane through the center cuts the sphere in a great circle, so');
       L.push('    abs(dot(p, n)) is the distance from that line. Gives a feature that');
       L.push('    wraps the whole body, which no blob can do."""');
       L.push('    r = rng(seed)');
@@ -260,7 +260,7 @@ var Emit = (function () {
     L.push('    last = len(RAMP) - 1');
     L.push('');
     L.push('    def to_body(px, py, pz):');
-    L.push('        """View space to body space. Returns the distance from the centre');
+    L.push('        """View space to body space. Returns the distance from the center');
     L.push('        along with the direction, since the caller needs both."""');
     L.push('        d = math.sqrt(px * px + py * py + pz * pz) or 1.0');
     L.push('        ax, ay, az = px / d, py / d, pz / d');
@@ -518,7 +518,7 @@ var Emit = (function () {
       L.push('');
     }
     if (p.cracks) {
-      L.push('/* A plane through the centre cuts the sphere in a great circle, so');
+      L.push('/* A plane through the center cuts the sphere in a great circle, so');
       L.push('   abs(dot(p, n)) is the distance from that line. */');
       L.push('function circles(seed, count, wMin, wSpan) {');
       L.push('  var r = rng(seed), out = [];');

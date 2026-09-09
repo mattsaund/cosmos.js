@@ -6,9 +6,8 @@
    stays flat and quiet.
 
    IN THIS FILE
-     tokens ..... colours, fonts and the few measurements that more
+     tokens ..... colors, fonts and the few measurements that more
                   than one rule depends on
-     header ..... the top bar
      layout ..... the three-panel grid, and how it folds up narrow
      controls ... one row per setting, plus the inputs they use
      preview .... the stage the planet sits in
@@ -22,7 +21,7 @@
 
 :root {
   /* Black and white, no hue anywhere. The planet is the only thing on the page
-     allowed a colour, and it gets that from the picker. */
+     allowed a color, and it gets that from the picker. */
   --bg:      #000000;
   --panel:   #0a0a0a;
   --panel-2: #131313;
@@ -41,9 +40,8 @@
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --r: 4px;
 
-  /* Chrome above the tool: the header bar plus the app's own padding. Used to
-     size the first row against the window, so keep them in step. */
-  --bar-h:   58px;
+  /* The app's own padding. The first row is sized against the window, so this
+     has to be discounted from it: see grid-template-rows below. */
   --app-pad: clamp(12px, 1.6vw, 18px);
   /* How much of the code panel sits above the fold. Enough for its tab row and
      a line or two of source, so it is obvious there is more to scroll to. */
@@ -59,25 +57,6 @@ body {
   font: 14px/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
 }
-
-/* --- header ------------------------------------------------- */
-.bar {
-  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  padding: 18px clamp(16px, 3vw, 28px);
-  border-bottom: 1px solid var(--line);
-}
-.bar h1 {
-  margin: 0; font: 500 18px/1 var(--mono); letter-spacing: -0.01em;
-}
-.bar h1::before { content: "~/"; color: var(--accent); }
-/* Same size the tagline was, so the bar keeps the height --bar-h assumes. */
-.bar .repo {
-  font: 400 13px/1.5 var(--mono);
-  color: var(--fg-3);
-  text-decoration: none;
-  transition: color .15s;
-}
-.bar .repo:hover { color: var(--fg); text-decoration: underline; }
 
 /* --- layout -------------------------------------------------
    Controls hold a fixed column; the preview takes the rest and the
@@ -111,8 +90,8 @@ body {
    preview's middle ends up below the fold. The controls scroll inside their own
    column instead of stretching the row; the code panes are a scroll away. */
 @media (min-width: 901px) {
-  .app { grid-template-rows: calc(100vh - var(--bar-h) - 2 * var(--app-pad) - var(--code-peek)) auto; }
-  .app { grid-template-rows: calc(100dvh - var(--bar-h) - 2 * var(--app-pad) - var(--code-peek)) auto; }
+  .app { grid-template-rows: calc(100vh - 2 * var(--app-pad) - var(--code-peek)) auto; }
+  .app { grid-template-rows: calc(100dvh - 2 * var(--app-pad) - var(--code-peek)) auto; }
   .controls { overflow-y: auto; }
   /* Both need to be allowed to shrink below their content, or the grid row
      cannot cap them. */
@@ -189,11 +168,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 }
 .seg button:first-child { border-radius: var(--r) 0 0 var(--r); }
 .seg button:last-child  { border-radius: 0 var(--r) var(--r) 0; }
-/* Pull the neighbour onto the shared edge so the two borders read as one
+/* Pull the neighbor onto the shared edge so the two borders read as one
    hairline. Dropping a border instead would leave the selected button missing
    that side of its outline, which is what used to happen here. */
 .seg button + button { margin-left: -1px; }
-/* Raised, so its complete outline draws over the neighbour's grey. */
+/* Raised, so its complete outline draws over the neighbor's gray. */
 .seg button.is-on {
   color: var(--accent); border-color: var(--accent); background: var(--on-bg);
   position: relative; z-index: 1;
@@ -217,7 +196,7 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .dim { color: var(--fg-3); }
 
 /* --- preview -------------------------------------------------
-   Grows to fill the panel, with the planet centred in whatever height that
+   Grows to fill the panel, with the planet centered in whatever height that
    turns out to be. The min-height only matters if the controls column is ever
    the shorter of the two.
 
@@ -226,9 +205,9 @@ button:hover { color: var(--accent); border-color: var(--accent); }
    others. The planet is meant to be ASCII and nothing else. */
 .stage {
   flex: 1 1 auto;
-  /* safe: if the art is ever larger than the box anyway, centring would put
+  /* safe: if the art is ever larger than the box anyway, centering would put
      its top-left corner outside the scrollable area, where it cannot be
-     reached. safe centring falls back to start alignment in that case. */
+     reached. safe centering falls back to start alignment in that case. */
   display: grid; place-items: safe center;
   min-height: 420px; padding: 16px;
   background: var(--bg);
