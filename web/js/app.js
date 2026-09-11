@@ -69,8 +69,8 @@
      In page order. One entry is one row of the controls panel.
 
        key       the cfg property it writes; also what `when` refers to
-       name      the row's caption, on the left of the readout
-       label     the words beside the box, for a check
+       name      the row's caption: above the control, or beside it for a
+                 check or the color swatch
        type      range | select | check | color | seg | number
        fmt       how the value reads out beside the label (default: 2dp)
        invert    the slider runs backward against the value it writes
@@ -103,7 +103,7 @@
     { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4, step: 0.01 },
     { key: 'tilt', name: 'tilt', type: 'range', min: -1.3, max: 1.3, step: 0.01 },
     { key: 'roll', name: 'roll', type: 'range', min: -1.6, max: 1.6, step: 0.01 },
-    { key: 'rings', name: 'rings', type: 'check', label: 'draw a ring system' },
+    { key: 'rings', name: 'rings', type: 'check' },
     { key: 'ringInner', name: 'ring inner', type: 'range', min: 1.05, max: 2.4, step: 0.01, when: 'rings' },
     { key: 'ringOuter', name: 'ring outer', type: 'range', min: 1.1, max: 3.2, step: 0.01, when: 'rings' },
     /* Preview only. The exports always animate, whatever this says: unchecking
@@ -111,7 +111,7 @@
        a texture or lining up a frame to copy. The two controls it hides do
        reach the exports, so a parked preview still exports a spinning planet
        at the speed and direction last set here. */
-    { key: 'spin', name: 'spin', type: 'check', label: 'spin the planet', preview: true },
+    { key: 'spin', name: 'spin', type: 'check', preview: true },
     { key: 'direction', name: 'direction', type: 'seg', when: 'spin',
       options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
     { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, step: 0.005,
@@ -144,29 +144,41 @@
   var stage = document.querySelector('.stage');
   var dims = document.getElementById('dims');
   /* key -> { input, val, wrap, spec }, filled in as the controls are built, so
-     sync() can find every piece of a row again without another DOM query. */
+     sync() can find every piece of a row again without another DOM query.
+     val is null on an inline row, a check or the color swatch, which has no
+     readout. */
   var nodes = {};
 
   /* --- build the controls ----------------------------------- *
      One pass over SPEC, building each row as: a label line with the name and
      the live readout, then whatever input the type calls for, then the
      listener that writes back into cfg. The handlers differ only in which
-     event they listen for and how much work the change costs. */
+     event they listen for and how much work the change costs.
+
+     Checkboxes and the color swatch break that layout. They are small enough
+     to carry their name beside them, like a form label, and they show their
+     own value, so they skip the label line entirely. */
   SPEC.forEach(function (c) {
     var wrap = document.createElement('div');
     wrap.className = 'ctl';
     wrap.dataset.key = c.key;
 
-    var top = document.createElement('div');
-    top.className = 'ctl__top';
-    var name = document.createElement('span');
-    name.className = 'ctl__name';
-    name.textContent = c.name;
-    var val = document.createElement('span');
-    val.className = 'ctl__val';
-    top.appendChild(name);
-    top.appendChild(val);
-    wrap.appendChild(top);
+    var inline = c.type === 'check' || c.type === 'color';
+
+    /* The label line: the name on the left, the live readout on the right. */
+    var val = null;
+    if (!inline) {
+      var top = document.createElement('div');
+      top.className = 'ctl__top';
+      var name = document.createElement('span');
+      name.className = 'ctl__name';
+      name.textContent = c.name;
+      val = document.createElement('span');
+      val.className = 'ctl__val';
+      top.appendChild(name);
+      top.appendChild(val);
+      wrap.appendChild(top);
+    }
 
     var input;
     if (c.type === 'range') {
@@ -183,11 +195,6 @@
     } else if (c.type === 'check') {
       input = document.createElement('input');
       input.type = 'checkbox';
-      var lab = document.createElement('label');
-      lab.className = 'check';
-      lab.appendChild(input);
-      lab.appendChild(document.createTextNode(' ' + c.label));
-      wrap.appendChild(lab);
     } else if (c.type === 'color') {
       input = document.createElement('input');
       input.type = 'color';
@@ -212,7 +219,17 @@
       });
     }
 
-    if (c.type !== 'check') wrap.appendChild(input);
+    /* An inline row wraps its input in a <label> with the name after it, so
+       clicking the word works as well as clicking the box or the swatch. */
+    if (inline) {
+      var lab = document.createElement('label');
+      lab.className = 'ctl__inline';
+      lab.appendChild(input);
+      lab.appendChild(document.createTextNode(c.name));
+      wrap.appendChild(lab);
+    } else {
+      wrap.appendChild(input);
+    }
     nodes[c.key] = { input: input, val: val, wrap: wrap, spec: c };
 
     if (c.type === 'range' || c.type === 'number') {
@@ -263,12 +280,14 @@
         nd.input.value = toSlider(c, v);
       }
 
-      if (c.type === 'check' || c.type === 'color') nd.val.textContent = '';
-      else if (c.type === 'select') nd.val.textContent = '';
-      else if (c.type === 'seg') nd.val.textContent = '';
-      /* Read out what the slider shows, not what it writes. */
-      else nd.val.textContent = c.fmt ? c.fmt(toSlider(c, v))
-                                      : Number(toSlider(c, v)).toFixed(2);
+      /* The readout. Inline rows have none at all, and a select or a seg
+         already shows its own value, so theirs stays blank. */
+      if (nd.val) {
+        if (c.type === 'select' || c.type === 'seg') nd.val.textContent = '';
+        /* Read out what the slider shows, not what it writes. */
+        else nd.val.textContent = c.fmt ? c.fmt(toSlider(c, v))
+                                        : Number(toSlider(c, v)).toFixed(2);
+      }
 
       /* Ring radii are meaningless with the rings switched off. */
       if (c.when) nd.wrap.style.display = cfg[c.when] ? '' : 'none';
