@@ -80,7 +80,9 @@
        name      the row's caption: above the control, or beside it for a
                  check or the color swatch
        type      range | select | check | color | seg | number
-       fmt       how the value reads out beside the label (default: 2dp)
+       min, max  the real range a range control spans. The page always shows
+                 0 to 100; fromSlider maps the position onto this
+       fmt       how a number box reads out beside its label
        invert    the slider runs backward against the value it writes
        preview   cheap: repaint, but do not rebuild the body
        when      only show this row while cfg[when] is truthy
@@ -96,31 +98,27 @@
        the grid always fills the panel: a smaller glyph is simply more of them.
        rebuild() turns this into a row count, so the number on the slider is
        the number of pixels a character actually gets. */
-    { key: 'size', name: 'font size', type: 'range', min: 4, max: 40, step: 1,
-      fmt: function (v) { return Math.round(v) + ' px'; } },
+    { key: 'size', name: 'font size', type: 'range', min: 4, max: 40 },
     /* How much of the panel the body fills, from a speck to the whole thing.
        It stops at 1 on purpose: past that the planet would run off its own
        frame and get cut, and the frame is the picture. Unlike font size this
        changes no character counts at all, only how much sky each one covers,
        and it rides into both exports through EXT_X and EXT_Y. */
-    { key: 'zoom', name: 'zoom', type: 'range', min: 0.08, max: 1, step: 0.01,
-      fmt: function (v) { return Math.round(v * 100) + '%'; } },
+    { key: 'zoom', name: 'zoom', type: 'range', min: 0.08, max: 1 },
     /* The top of this range is well past the point where the lit side starts
        clipping to a solid block of '@'. That is deliberate: a blown out planet
        is a look, and the ramp only has ten steps to lose. */
-    { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 3, step: 0.01 },
+    { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 3 },
     /* Writes ambient light, but reads as its opposite: more shadow is less
        light on the night side. See toSlider/fromSlider. */
-    { key: 'ambient', name: 'shadow', type: 'range', min: 0, max: 0.6, step: 0.01,
-      invert: true },
-    { key: 'craters', name: 'crater count', type: 'range', min: 0, max: 45, step: 1,
-      fmt: function (v) { return String(Math.round(v)); } },
-    { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4, step: 0.01 },
-    { key: 'tilt', name: 'tilt', type: 'range', min: -1.3, max: 1.3, step: 0.01 },
-    { key: 'roll', name: 'roll', type: 'range', min: -1.6, max: 1.6, step: 0.01 },
+    { key: 'ambient', name: 'shadow', type: 'range', min: 0, max: 0.6, invert: true },
+    { key: 'craters', name: 'crater count', type: 'range', min: 0, max: 45 },
+    { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4 },
+    { key: 'tilt', name: 'tilt', type: 'range', min: -1.3, max: 1.3 },
+    { key: 'roll', name: 'roll', type: 'range', min: -1.6, max: 1.6 },
     { key: 'rings', name: 'rings', type: 'check' },
-    { key: 'ringInner', name: 'ring inner', type: 'range', min: 1.05, max: 2.4, step: 0.01, when: 'rings' },
-    { key: 'ringOuter', name: 'ring outer', type: 'range', min: 1.1, max: 3.2, step: 0.01, when: 'rings' },
+    { key: 'ringInner', name: 'ring inner', type: 'range', min: 1.05, max: 2.4, when: 'rings' },
+    { key: 'ringOuter', name: 'ring outer', type: 'range', min: 1.1, max: 3.2, when: 'rings' },
     /* Preview only. The exports always animate, whatever this says: unchecking
        it parks the angle where it is, which is what you want while dialing in
        a texture or lining up a frame to copy. The two controls it hides do
@@ -129,18 +127,35 @@
     { key: 'spin', name: 'spin', type: 'check', preview: true },
     { key: 'direction', name: 'direction', type: 'seg', when: 'spin',
       options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
-    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, step: 0.005,
-      when: 'spin' },
+    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, when: 'spin' },
     { key: 'color', name: 'color', type: 'color', preview: true },
     { key: 'seed', name: 'seed', type: 'number', min: 0, step: 1,
       fmt: function (v) { return String(Math.round(v)); } }
   ];
 
-  /* A slider can run the opposite way to the value it writes. Keeping the
-     conversion in one pair of functions means the handler, the readout and the
-     initial position cannot disagree about which way round it is. */
-  function toSlider(c, v) { return c.invert ? (c.min + c.max - v) : v; }
-  function fromSlider(c, p) { return c.invert ? (c.min + c.max - p) : p; }
+  /* Every slider runs 0 to 100 whatever it actually writes, so the controls
+     column reads as one set of dials rather than as eleven unrelated number
+     lines. The real range lives in SPEC and never reaches the page: these two
+     functions are the only place the two scales meet, which is what keeps the
+     handler, the readout and the opening position from disagreeing.
+
+     `invert` still flips the direction, for the one slider that reads as the
+     opposite of the value it writes. */
+  var SLIDER_MAX = 100;
+
+  function toSlider(c, v) {
+    var t = (v - c.min) / (c.max - c.min);              // real value as 0..1
+    if (c.invert) t = 1 - t;
+    return Math.round(clamp01(t) * SLIDER_MAX);
+  }
+
+  function fromSlider(c, p) {
+    var t = clamp01(p / SLIDER_MAX);
+    if (c.invert) t = 1 - t;
+    return c.min + t * (c.max - c.min);
+  }
+
+  function clamp01(t) { return t < 0 ? 0 : t > 1 ? 1 : t; }
 
   var host = document.getElementById('controls');
   var out = document.getElementById('out');
@@ -187,7 +202,9 @@
     if (c.type === 'range') {
       input = document.createElement('input');
       input.type = 'range';
-      input.min = c.min; input.max = c.max; input.step = c.step;
+      /* Always 0 to 100 on the page. fromSlider turns the position back into
+         whatever the renderer actually wants. */
+      input.min = 0; input.max = SLIDER_MAX; input.step = 1;
     } else if (c.type === 'select') {
       input = document.createElement('select');
       c.options.forEach(function (o) {
@@ -279,17 +296,25 @@
         });
       } else if (c.type === 'check') {
         nd.input.checked = !!v;
-      } else {
+      } else if (c.type === 'range') {
+        /* The only control whose page value is not its config value. A select,
+           a color well and a number box all carry the setting itself, and
+           running those through toSlider asks for (v - undefined), which lands
+           NaN in the element and empties it. */
         nd.input.value = toSlider(c, v);
+      } else {
+        nd.input.value = v;
       }
 
       /* The readout. Inline rows have none at all, and a select or a seg
          already shows its own value, so theirs stays blank. */
       if (nd.val) {
         if (c.type === 'select' || c.type === 'seg') nd.val.textContent = '';
-        /* Read out what the slider shows, not what it writes. */
-        else nd.val.textContent = c.fmt ? c.fmt(toSlider(c, v))
-                                        : Number(toSlider(c, v)).toFixed(2);
+        /* The readout reports the slider, not the setting behind it: every
+           range reads 0 to 100 like every other one. A number box is the
+           exception, since the number in it is the value itself. */
+        else if (c.type === 'number') nd.val.textContent = c.fmt ? c.fmt(v) : String(v);
+        else nd.val.textContent = String(toSlider(c, v));
       }
 
       /* Ring radii are meaningless with the rings switched off. */
@@ -297,11 +322,15 @@
     });
 
     /* An inner radius above the outer one draws nothing at all, which looks
-       like a bug rather than a setting. Keep them ordered. */
+       like a bug rather than a setting. Keep them ordered, and push the nudge
+       back out through toSlider: the row is a 0 to 100 slider like every other
+       one, so writing a radius straight into it would peg the thumb at the end
+       and print a number the page never uses. */
     if (cfg.ringOuter < cfg.ringInner + 0.15) {
-      cfg.ringOuter = cfg.ringInner + 0.15;
-      nodes.ringOuter.input.value = cfg.ringOuter;
-      nodes.ringOuter.val.textContent = cfg.ringOuter.toFixed(2);
+      var nd = nodes.ringOuter;
+      cfg.ringOuter = Math.min(nd.spec.max, cfg.ringInner + 0.15);
+      nd.input.value = toSlider(nd.spec, cfg.ringOuter);
+      nd.val.textContent = String(toSlider(nd.spec, cfg.ringOuter));
     }
   }
 
@@ -317,12 +346,6 @@
     cfg.wide = stageShape();          // the frame is cut to the panel it fills
     cfg.rows = rowsForSize(cfg.size);  // and the grid to the glyph size asked for
     body = Cosmos.build(cfg);
-    /* What the glyphs actually came out at, which is the slider's own number
-       everywhere except the small end, where the budget in rowsForSize rounds
-       them up. sync() has already run by here, so this is the last word, and
-       it should be the true one rather than the one that was asked for. */
-    var box = stageBox();
-    if (box.h > 0) nodes.size.val.textContent = Math.round(box.h / body.rows) + ' px';
     paint();
     code();
   }

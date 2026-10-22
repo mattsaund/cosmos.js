@@ -348,7 +348,12 @@ var Emit = (function () {
     L.push('                v = back');
     L.push('            # int(x + 0.5), not round(): Python rounds half to even and');
     L.push('            # would pick a different glyph than the JavaScript original.');
-    L.push('            line.append(RAMP[int(min(1.0, max(0.0, v)) * last + 0.5)])');
+    L.push('            idx = int(min(1.0, max(0.0, v)) * last + 0.5)');
+    L.push('            # RAMP[0] is a space, the same glyph as empty sky, so the');
+    L.push('            # darkest ground would read as a hole in the planet.');
+    L.push('            if idx == 0 and hit:');
+    L.push('                idx = 1');
+    L.push('            line.append(RAMP[idx])');
     L.push('        rows.append("".join(line))');
     L.push('    return "\\n".join(rows)');
     L.push('');
@@ -698,7 +703,11 @@ var Emit = (function () {
     L.push('      var v = (cov > 0 && (d2 > 1 || zr > zs))');
     L.push('            ? ringLum * cov + back * (1 - cov)');
     L.push('            : back;');
-    L.push('      line.push(RAMP.charAt(Math.round(Math.min(1, Math.max(0, v)) * last)));');
+    L.push('      var idx = Math.round(Math.min(1, Math.max(0, v)) * last);');
+    L.push('      // RAMP[0] is a space, the same glyph as empty sky, so the');
+    L.push('      // darkest ground would read as a hole in the planet.');
+    L.push('      if (idx === 0 && hit) idx = 1;');
+    L.push('      line.push(RAMP.charAt(idx));');
     L.push('    }');
     L.push('    out.push(line.join(""));');
     L.push('  }');

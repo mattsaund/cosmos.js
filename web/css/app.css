@@ -69,9 +69,6 @@
   /* The app's own padding. The first row is sized against the window, so this
      has to be discounted from it: see grid-template-rows below. */
   --app-pad: clamp(12px, 1.6vw, 18px);
-  /* How much of the code panel sits above the fold. Enough for its tab row and
-     a line or two of source, so it is obvious there is more to scroll to. */
-  --code-peek: 112px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -82,6 +79,10 @@
 html { font-family: var(--font); }
 
 body {
+  /* The app is sized to the viewport, so anything that would scroll the page
+     is a layout bug rather than content. The narrow breakpoint turns this
+     back on, where stacking really does need the scroll. */
+  overflow: hidden;
   margin: 0;
   background: var(--bg);
   color: var(--fg);
@@ -95,43 +96,64 @@ body {
 button, input, select, textarea, option { font-family: inherit; }
 
 /* --- layout -------------------------------------------------
-   Controls hold a fixed column; the preview takes the rest and the
-   code panes run the full width underneath, where long lines have
-   room to breathe. */
+   One screen, three columns, no page scroll: controls on the
+   left, the square preview in the middle, the generated source
+   down the right where it can scroll on its own.
+
+   The page itself never scrolls. Anything that can outgrow its
+   box scrolls inside that box instead, which is why both the
+   controls column and the source panes carry their own
+   overflow. */
 .app {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
-  grid-template-areas: "controls preview" "code code";
+  grid-template-columns: 290px auto minmax(280px, 1fr);
+  grid-template-areas: "controls preview code";
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--app-pad);
   padding: var(--app-pad);
-  /* Stretch, not start: the preview panel matches the height of the controls
-     column beside it instead of stopping at its own content. */
-  align-items: stretch;
+  /* dvh, so a mobile browser's collapsing toolbar does not leave the bottom
+     of the page permanently out of reach. The vh line before it is the
+     fallback for anything that does not know dvh. */
+  height: 100vh;
+  height: 100dvh;
 }
-.controls { grid-area: controls; }
-/* A column, so the stage can take every pixel the panel head does not. */
-.preview  { grid-area: preview; display: flex; flex-direction: column; }
-.code     { grid-area: code; }
+.controls { grid-area: controls; overflow-y: auto; }
 
+/* A perfect square, and the only panel whose width is decided by its height
+   rather than by the grid. `auto` on the middle column means the column takes
+   whatever width the square resolves to, so the source panel gets the rest.
+   The head sits over the top of the stage rather than above it, because a bar
+   with its own height would make the panel a square plus a strip. */
+.preview {
+  grid-area: preview;
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+.preview .panel__head {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  border-bottom: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.stage { position: absolute; inset: 0; }
+
+.code { grid-area: code; display: flex; flex-direction: column; min-height: 0; }
+
+/* Narrow: the three columns become three rows and the page is allowed to
+   scroll again, because a square preview plus controls plus source does not
+   fit a phone screen at any useful size. */
 @media (max-width: 900px) {
   .app {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "preview" "controls" "code";
+    grid-template-rows: auto auto auto;
+    height: auto;
   }
-}
-
-/* The first screen is the tool: the preview fills the window top to bottom, so
-   a wide ring system has the whole viewport to sit in. Without this the row is
-   as tall as the controls column, which is taller than most windows, and the
-   preview's middle ends up below the fold. The controls scroll inside their own
-   column instead of stretching the row; the code panes are a scroll away. */
-@media (min-width: 901px) {
-  .app { grid-template-rows: calc(100vh - 2 * var(--app-pad) - var(--code-peek)) auto; }
-  .app { grid-template-rows: calc(100dvh - 2 * var(--app-pad) - var(--code-peek)) auto; }
-  .controls { overflow-y: auto; }
-  /* Both need to be allowed to shrink below their content, or the grid row
-     cannot cap them. */
-  .preview, .stage { min-height: 0; }
+  .preview { height: auto; }
+  .controls { overflow-y: visible; }
+  body { overflow: auto; }
 }
 
 .panel {
@@ -252,18 +274,22 @@ button:hover { color: var(--accent); border-color: var(--accent); }
    which is invisible on some monitors and reads as a halo around the art on
    others. The planet is meant to be ASCII and nothing else. */
 .stage {
-  flex: 1 1 auto;
-  /* safe: if the art is ever larger than the box anyway, centering would put
-     its top-left corner outside the scrollable area, where it cannot be
-     reached. safe centering falls back to start alignment in that case. */
+  /* The art is fitted to this box, so centering it is exact rather than a
+     guess. `safe` is kept as the floor: if a frame ever did come out larger
+     than the box, centering would push its top-left corner out of reach,
+     and safe centering falls back to start alignment instead. */
   display: grid; place-items: safe center;
   /* No padding. The art is cut to this box and drawn at the size that fills
      it, so any padding here reads as a border around the planet. The frame
      already carries room of its own, see ROOM in planet.js. */
-  min-height: 420px; padding: 0;
+  padding: 0;
   background: var(--bg);
-  border-radius: 0 0 var(--r) var(--r);
-  overflow: auto;
+  border-radius: var(--r);
+  /* hidden, not auto. The art is fitted to this box every paint, so it can
+     only ever overrun it by a sub-pixel rounding error, and `auto` turned
+     that fraction of a pixel into a pair of real scrollbars across a picture
+     with nothing to scroll to. */
+  overflow: hidden;
 }
 #out {
   margin: 0;
@@ -290,7 +316,9 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .src {
   display: none;
   margin: 0; padding: 14px;
-  max-height: 460px; overflow: auto;
+  /* The pane is the scrolling box now, not the page. flex:1 inside the code
+     panel gives it every pixel the tab row does not want. */
+  flex: 1 1 auto; min-height: 0; overflow: auto;
   font: 400 12px/1.55 var(--font);
   color: var(--fg-2);
   white-space: pre;

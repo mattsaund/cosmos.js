@@ -617,9 +617,21 @@ var Cosmos = (function () {
               ? ringLum * cov + back * (1 - cov)
               : back;
         /* And this is the line the whole file exists for: a brightness in
-           0..1 becomes one of ten characters. Index 0 is a space, so empty sky
-           falls out of the same expression. */
-        line[i] = RAMP.charAt(Math.round(clamp(v, 0, 1) * lastIdx));
+           0..1 becomes one of ten characters.
+
+           Index 0 of the ramp is a space, which is also what empty sky is
+           drawn with. A dark enough patch of surface therefore used to come
+           out indistinguishable from a gap in the planet, and on ice, whose
+           fractures bottom out near zero, that punched visible holes clean
+           through the disk. Anything the ray actually struck gets at least
+           index 1, so the darkest ground is still ground.
+
+           Rings are deliberately left out of this. A ring thins to nothing at
+           its outer edge, and fading to sky there is the point; forcing a
+           glyph would draw a hard rim around something that has none. */
+        var idx = Math.round(clamp(v, 0, 1) * lastIdx);
+        if (idx === 0 && hit) idx = 1;
+        line[i] = RAMP.charAt(idx);
       }
       out[j] = line.join('');
     }
