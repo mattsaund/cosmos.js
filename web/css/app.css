@@ -10,10 +10,11 @@
      font ....... the one typeface, loaded from the repo
      tokens ..... colors and the few measurements that more than
                   one rule depends on
-     layout ..... the three-panel grid, and how it folds up narrow
+     layout ..... the three-panel grid
      controls ... one row per setting, plus the inputs they use
-     preview .... the stage the planet sits in
+     preview .... the black square the planet is drawn in
      code ....... the tabbed source panes
+     narrow ..... how it all folds into one column on a phone
 
    No preprocessor and no build step: this file is served exactly as
    it is written.
@@ -66,9 +67,15 @@
   --font: "Paper Mono", monospace;
   --r: 4px;
 
-  /* The app's own padding. The first row is sized against the window, so this
-     has to be discounted from it: see grid-template-rows below. */
+  /* The gap around and between the three panels. The grid is exactly the
+     window's height, with border-box sizing, so this comes out of that height
+     rather than adding to it and pushing the page into a scroll. */
   --app-pad: clamp(12px, 1.6vw, 18px);
+  /* The narrowest either side column may go. The two are always the same
+     width, so this is one number for both: wide enough for the controls to
+     stay usable, and for the source pane's type, which shrinks with its
+     column, to still fit the longest line at a size that can be read. */
+  --side-min: 380px;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -97,8 +104,14 @@ button, input, select, textarea, option { font-family: inherit; }
 
 /* --- layout -------------------------------------------------
    One screen, three columns, no page scroll: controls on the
-   left, the square preview in the middle, the generated source
-   down the right where it can scroll on its own.
+   left, the preview in the middle, the generated source down the
+   right where it can scroll on its own.
+
+   The preview is a perfect square as tall as the window, and it
+   takes its width from that height, so it is the column the other
+   two are fitted around. They split whatever width is left, each
+   kept above its own minimum, which is what lets the app reach
+   both edges of any window instead of leaving bars down the sides.
 
    The page itself never scrolls. Anything that can outgrow its
    box scrolls inside that box instead, which is why both the
@@ -106,7 +119,13 @@ button, input, select, textarea, option { font-family: inherit; }
    overflow. */
 .app {
   display: grid;
-  grid-template-columns: 290px auto minmax(280px, 1fr);
+  /* The two side columns are the same track, so they always come out the
+     same width as each other. The source pane does not need a wider minimum
+     to avoid scrolling sideways, because its type is sized to its column
+     instead (see .src). minmax(0, auto) on the preview means that on a window
+     too narrow for a full height square, it is the preview that gives up
+     width rather than either side. */
+  grid-template-columns: minmax(var(--side-min), 1fr) minmax(0, auto) minmax(var(--side-min), 1fr);
   grid-template-areas: "controls preview code";
   grid-template-rows: minmax(0, 1fr);
   gap: var(--app-pad);
@@ -118,43 +137,11 @@ button, input, select, textarea, option { font-family: inherit; }
   height: 100dvh;
 }
 .controls { grid-area: controls; overflow-y: auto; }
-
-/* A perfect square, and the only panel whose width is decided by its height
-   rather than by the grid. `auto` on the middle column means the column takes
-   whatever width the square resolves to, so the source panel gets the rest.
-   The head sits over the top of the stage rather than above it, because a bar
-   with its own height would make the panel a square plus a strip. */
-.preview {
-  grid-area: preview;
-  position: relative;
-  height: 100%;
-  aspect-ratio: 1 / 1;
-  overflow: hidden;
-}
-.preview .panel__head {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
-  border-bottom: 0;
-  background: transparent;
-  pointer-events: none;
-}
-.stage { position: absolute; inset: 0; }
-
-.code { grid-area: code; display: flex; flex-direction: column; min-height: 0; }
-
-/* Narrow: the three columns become three rows and the page is allowed to
-   scroll again, because a square preview plus controls plus source does not
-   fit a phone screen at any useful size. */
-@media (max-width: 900px) {
-  .app {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: "preview" "controls" "code";
-    grid-template-rows: auto auto auto;
-    height: auto;
-  }
-  .preview { height: auto; }
-  .controls { overflow-y: visible; }
-  body { overflow: auto; }
-}
+.preview  { grid-area: preview; }
+.code     { grid-area: code; display: flex; flex-direction: column; min-height: 0;
+            /* A size container, so the source pane can size its type off the
+               column's width with cqi units. */
+            container-type: inline-size; }
 
 .panel {
   background: var(--panel);
@@ -266,23 +253,55 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .dim { color: var(--fg-3); }
 
 /* --- preview -------------------------------------------------
-   Grows to fill the panel, with the planet centered in whatever height that
-   turns out to be. The min-height only matters if the controls column is ever
-   the shorter of the two.
+   A black square with the planet drawn edge to edge inside it.
 
-   Flat black on purpose. This carried a faint radial wash behind the planet,
-   which is invisible on some monitors and reads as a halo around the art on
-   others. The planet is meant to be ASCII and nothing else. */
+   The panel itself is the square: as tall as its row, and as wide as
+   that height by aspect-ratio. On a window too narrow to give it
+   that width, max-width lets it give way and come out taller than it
+   is wide. The frame in planet.js fits whichever side is shorter, so
+   the planet stays whole either way.
+
+   The stage fills the panel exactly. A square stage once sat centered
+   inside a wider panel, and the panel's gray showed down both sides of
+   the planet as two bars.
+
+   Flat black on purpose. This carried a faint radial wash behind the
+   planet, which is invisible on some monitors and reads as a halo
+   around the art on others. The planet is meant to be ASCII and
+   nothing else. */
+.preview {
+  position: relative;
+  height: 100%;
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  overflow: hidden;
+  /* Black, not the panel gray, so nothing but the planet and its sky ever
+     shows inside the border, not even in the stage's rounded corners. */
+  background: var(--bg);
+}
+/* The head sits over the top of the stage rather than above it, because a
+   bar with a height of its own would eat into the square. */
+.preview .panel__head {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  border-bottom: 0;
+  background: transparent;
+  pointer-events: none;
+}
 .stage {
+  position: absolute; inset: 0;
   /* The art is fitted to this box, so centering it is exact rather than a
      guess. `safe` is kept as the floor: if a frame ever did come out larger
-     than the box, centering would push its top-left corner out of reach,
-     and safe centering falls back to start alignment instead. */
+     than the box, centering would push its top-left corner out of reach, and
+     safe centering falls back to start alignment instead.
+
+     No padding, because the art is cut to this box and drawn at the size that
+     fills it: any padding would read as a border around the planet. The frame
+     already carries a hair of room of its own, see ROOM in planet.js. */
   display: grid; place-items: safe center;
-  /* No padding. The art is cut to this box and drawn at the size that fills
-     it, so any padding here reads as a border around the planet. The frame
-     already carries room of its own, see ROOM in planet.js. */
-  padding: 0;
+  /* The stage's size never depends on the art, and nothing outside it depends
+     on what is inside. Saying so lets the browser keep the relayout of a new
+     frame inside this box instead of checking the rest of the page too. */
+  contain: strict;
   background: var(--bg);
   border-radius: var(--r);
   /* hidden, not auto. The art is fitted to this box every paint, so it can
@@ -319,7 +338,20 @@ button:hover { color: var(--accent); border-color: var(--accent); }
   /* The pane is the scrolling box now, not the page. flex:1 inside the code
      panel gives it every pixel the tab row does not want. */
   flex: 1 1 auto; min-height: 0; overflow: auto;
-  font: 400 12px/1.55 var(--font);
+  /* Type sized to the column, so the longest line emit.js can write always
+     fits without scrolling sideways, however wide the column comes out.
+
+     That line is 77 characters, and a Paper Mono character is 0.606em wide,
+     so the line is 46.7em. The 48px taken off the column first covers the
+     pane's padding (28), the panel's border (2) and a scrollbar (up to 15),
+     and dividing by 48 rather than 46.7 leaves a little slack on top.
+     Clamped so it never gets smaller than legible on a narrow window, or
+     larger than the rest of the chrome on a very wide one. If an emitted
+     line ever grows past 77, the 48s here have to grow with it. */
+  font-family: var(--font);
+  font-weight: 400;
+  font-size: clamp(7px, calc((100cqi - 48px) / 48), 12px);
+  line-height: 1.6;
   color: var(--fg-2);
   white-space: pre;
   tab-size: 4;
@@ -338,3 +370,27 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .t-num { color: #bb9095; }
 
 ::selection { background: var(--accent); color: #000; }
+
+/* --- narrow -------------------------------------------------
+   Below 900px the three columns become three rows and the page
+   is allowed to scroll again, because a square preview beside two
+   columns of controls and source does not fit a phone screen at
+   any useful size. Last in the file, so these win over the rules
+   above without needing heavier selectors. */
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "preview" "controls" "code";
+    grid-template-rows: auto auto auto;
+    height: auto;
+  }
+  /* Square from the width now, since there is no fixed height to take it
+     from. The stage and the head are absolutely positioned and give the
+     panel no height of their own, so without this it collapses to nothing. */
+  .preview { width: 100%; height: auto; max-width: none; }
+  .controls { overflow-y: visible; }
+  /* A fixed share of the screen, so the source scrolls inside its pane
+     rather than stretching the page by the length of the program. */
+  .code { height: 80vh; }
+  body { overflow: auto; }
+}

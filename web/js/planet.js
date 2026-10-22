@@ -55,6 +55,7 @@
      textures ......... five surfaces, one albedo function each
      config ........... defaults() and build()
      shape ............ radius(), what makes a body non-spherical
+     view cache ....... the part of a frame that does not turn
      render ........... the per-glyph loop
    ============================================================ */
 var Cosmos = (function () {
@@ -65,7 +66,8 @@ var Cosmos = (function () {
   /* Bourke's 10-level ramp. Ink density rises monotonically, which the
      obvious-looking ".,:;=+ic*ox%#@" does not: 'i' and 'c' read lighter than
      '=' and '+', so gradients come out mottled. Index 0 is a space, which
-     gives the empty-sky threshold for free. */
+     gives the empty-sky threshold for free; render() keeps lit ground off it,
+     see the floor at the end of the per-glyph loop. */
   var RAMP = ' .:-=+*#%@';
 
   /* Glyph advance divided by line height. A character cell is taller than it
@@ -191,7 +193,7 @@ var Cosmos = (function () {
      features will push the albedo negative or well past the top of the ramp,
      and either of those comes out as a flat slab of a single character.
 
-     Adding a texture means adding it in five other places as well; the
+     Adding a texture means adding it in four other places as well; the
      checklist is at the top of emit.js. */
 
   var TEXTURES = {
@@ -325,6 +327,7 @@ var Cosmos = (function () {
      What comes back, and who reads it:
 
        tex, amb, gain             the shading; read at every glyph
+       tilt, roll                 where the pole points; read once a frame
        rows, cols                 the size of the character grid
        extX, extY                 how much sky the frame covers, in body radii.
                                   Their ratio is the frame's shape on screen;
@@ -381,14 +384,12 @@ var Cosmos = (function () {
       }
       b.max = m * 1.05;
     }
-    /* How much sky the frame covers, in body radii.
-
-       Both axes get the same reach, and neither is a function of tilt or roll.
-       That is the whole point: the frame used to be fitted to the body's
-       projected silhouette, so every nudge of either slider resized the frame,
-       and the planet appeared to swell and shrink while the pole swung around.
-       It should sit still and turn, so the reach is measured in BODY space,
-       where turning the body changes nothing.
+    /* How far the body reaches, in body radii, and it is never a function of
+       tilt or roll. That is the whole point: the frame used to be fitted to
+       the body's projected silhouette, so every nudge of either slider resized
+       the frame, and the planet appeared to swell and shrink while the pole
+       swung around. It should sit still and turn, so the reach is measured in
+       BODY space, where turning the body changes nothing.
 
        The price is a little empty sky beside a ring system seen edge on: the
        frame is cut for the rings at their widest, whatever angle they are
@@ -413,12 +414,16 @@ var Cosmos = (function () {
     var wide = clamp(c.wide > 0 ? c.wide : 1, 0.25, 4);
     b.cols = Math.max(8, Math.round(b.rows * wide / CHAR_ASPECT));
 
-    /* Vertical reach first, since that is the one the body has to fit inside,
-       then width from the column count that actually came out. Deriving extX
+    /* The reach has to fit the frame's SHORTER side, or zoom 1 runs the body
+       off the edges: the preview is square on a wide window, but on a narrow
+       one it gives way and comes out taller than it is wide. The longer side
+       then follows from the column count that actually came out. Deriving it
        from `wide` directly would let the rounding above leave the disk very
        slightly oval. */
-    b.extY = reach * ROOM / zoom;
-    b.extX = b.extY * (b.cols * CHAR_ASPECT / b.rows);
+    var shape = b.cols * CHAR_ASPECT / b.rows;   // the frame's width over height
+    var half = reach * ROOM / zoom;              // half the shorter side
+    if (shape >= 1) { b.extY = half; b.extX = half * shape; }
+    else            { b.extX = half; b.extY = half / shape; }
     return b;
   }
 
@@ -458,47 +463,175 @@ var Cosmos = (function () {
 
   /* --- render ---------------------------------------------- */
 
-  /* One frame of body `b`, turned to `angle` radians. Comes back as rows of
-     glyphs joined by newlines, with no trailing newline: exactly what a <pre>
-     wants. Nothing is kept between calls apart from the body itself, so frames
-     can be drawn in any order, which is what makes scrubbing and the --once
-     exports work.
+  /* The frame's orientation, from tilt and roll: the spin axis n, in view
+     space, and two more axes u and v lying across the equator. Shared by
+     see() and render(), so both work from the same numbers to the last bit.
 
-     The whole function is one pass over the grid. Everything before the loop
-     is setup that would otherwise be recomputed at every glyph. */
-  function render(b, angle) {
-    var W = b.cols, H = b.rows, extX = b.extX, extY = b.extY;
-    var lastIdx = RAMP.length - 1;
-
-    /* Setup 1: the spin axis, in view space. Tilt leans the pole toward or
-       away from the viewer; roll turns it within the plane of the screen. */
+     Tilt leans the pole toward or away from the viewer; roll turns it within
+     the plane of the screen. h is any direction that is not parallel to the
+     axis, and the cross products turn it into a clean perpendicular pair. The
+     swap when the axis is near +z is that "not parallel" clause earning its
+     keep: crossing a vector with itself leaves nothing to normalize. */
+  function axesOf(b) {
     var ct = Math.cos(b.tilt), st = Math.sin(b.tilt);
     var nx = -Math.sin(b.roll) * ct, ny = Math.cos(b.roll) * ct, nz = st;
-
-    /* Setup 2: two more axes to finish the frame, both lying across the
-       equator. h is any direction that is not parallel to the axis, and the
-       cross products turn it into a clean perpendicular pair. The swap when
-       the axis is near +z is that "not parallel" clause earning its keep:
-       crossing a vector with itself leaves nothing to normalize. */
     var hx = 0, hy = 0, hz = 1;
     if (Math.abs(nz) > 0.9) { hx = 1; hz = 0; }
     var ux = hy * nz - hz * ny, uy = hz * nx - hx * nz, uz = hx * ny - hy * nx;
     var um = Math.sqrt(ux * ux + uy * uy + uz * uz) || 1;
     ux /= um; uy /= um; uz /= um;
     var vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
+    return { nx: nx, ny: ny, nz: nz, ux: ux, uy: uy, uz: uz, vx: vx, vy: vy, vz: vz };
+  }
 
-    /* Setup 3: everything else the inner loop would otherwise re-read. */
-    var ca = Math.cos(angle), sa = Math.sin(angle);
-    var lx = LIGHT[0], ly = LIGHT[1], lz = LIGHT[2];
+  /* --- view cache ------------------------------------------ *
+     Most of what render() works out for a glyph has nothing to do with the
+     spin angle. Which glyphs land on a smooth body, how deep the surface sits
+     under each, how much light that point gets, where it lies along the spin
+     axis, where the ring plane crosses its ray and how thick the rings are
+     there: all of it is fixed by the frame, the tilt and the roll, and only
+     changes when the body is rebuilt. Turning the body just rotates each
+     point about the axis.
+
+     So that fixed part is worked out once per body and kept here, and a frame
+     is only the rotation and the texture lookup for each glyph. The preview
+     draws many frames a second for as long as it is open, and redoing all of
+     this for every one of them was most of what set laptop fans spinning.
+
+     Every value is computed with the same operations, in the same order, as
+     the path that does not cache, so the frame comes out identical to the
+     last bit. That matters: the exports cache nothing, and they still have to
+     draw exactly the planet the preview draws.
+
+     A lumpy body only gets the ring half. Its silhouette is made of lumps
+     that turn with it, so which glyphs it covers really does change from one
+     angle to the next.
+
+     One cache, and its arrays are reused while the grid stays the same size.
+     The app draws one body at a time, and a slider drag builds a new body on
+     every step: allocating fresh arrays for each would churn out megabytes of
+     garbage a second. A body is treated as fixed once it is built; drawing a
+     different one rebuilds the cache. */
+  var view = null;
+
+  function see(b, old) {
+    var W = b.cols, H = b.rows, N = W * H, extX = b.extX, extY = b.extY;
+    var a = axesOf(b), lx = LIGHT[0], ly = LIGHT[1], lz = LIGHT[2];
     var rings = b.rings, gaps = rings ? rings.gaps : null;
 
-    /* View space -> body space, and the single busiest function in the
-       project. It writes the direction into _bx/_by/_bz and RETURNS the
-       distance from the center, because the ray search needs both and handing
-       back a pair would allocate an object per bisection step.
+    var c = old && old.size >= N ? old : {
+      size: N,
+      hit: new Uint8Array(N),      // 1 where the ray meets a smooth body
+      zs: new Float64Array(N),     // depth of that surface, toward the viewer
+      b0: new Float64Array(N),     // the point across the equator, before the
+      b1: new Float64Array(N),     //   spin turns it: render() rotates these
+      by: new Float64Array(N),     // the point along the axis, which the spin
+      la: new Float64Array(N),     //   never moves, and its latitude
+      shade: new Float64Array(N),  // light reaching the point, ambient included
+      limb: new Float64Array(N),   // limb darkening, times brightness
+      ring: new Uint8Array(N),     // 1 where the ray meets ring material
+      zr: new Float64Array(N),     // depth of the ring plane on that ray
+      cov0: new Float64Array(N),   // ring thickness at that radius
+      ringAt: new Float64Array(N), // azimuth around the ring, at angle 0
+      ringPow: new Float64Array(N),// rr ** -1.5, for the Keplerian shear
+      shadow: new Uint8Array(N)    // 1 where the planet shades the ring
+    };
+    c.body = b;
+    c.ringsShown = !!rings && Math.abs(a.nz) > 0.05;
 
-       Scratch rather than a returned array: this runs once per bisection step
-       per cell, and allocating there would be all GC and no work. */
+    for (var j = 0; j < H; j++) {
+      var sy = (1 - 2 * (j + 0.5) / H) * extY;
+      for (var i = 0; i < W; i++) {
+        var sx = (2 * (i + 0.5) / W - 1) * extX;
+        var d2 = sx * sx + sy * sy, k = j * W + i;
+
+        /* The surface, for a smooth body only. The arithmetic is toBody()'s
+           and the lighting block's from render(), minus the rotation. */
+        c.hit[k] = 0;
+        c.zs[k] = -1e9;
+        if (!b.rock && d2 <= 1) {
+          var zs = Math.sqrt(1 - d2);
+          var L = Math.sqrt(sx * sx + sy * sy + zs * zs) || 1;
+          var ax = sx / L, ay = sy / L, az = zs / L;
+          var nzv = zs / L;                         // cosine of the view angle
+          var lum = (sx / L) * lx + (sy / L) * ly + nzv * lz;
+          if (lum < 0) lum = 0;                     // turned away from the light
+          var by = clamp(ax * a.nx + ay * a.ny + az * a.nz, -1, 1);
+          c.hit[k] = 1;
+          c.zs[k] = zs;
+          c.b0[k] = ax * a.ux + ay * a.uy + az * a.uz;
+          c.b1[k] = ax * a.vx + ay * a.vy + az * a.vz;
+          c.by[k] = by;
+          c.la[k] = Math.asin(by);
+          c.shade[k] = b.amb + (1 - b.amb) * lum * (0.45 + 0.55 * lum);
+          c.limb[k] = (0.58 + 0.42 * nzv) * b.gain;
+        }
+
+        /* The ring plane. Everything but the Keplerian phase, which is the
+           one part of the rings that moves with the angle. */
+        c.ring[k] = 0;
+        if (c.ringsShown) {
+          var zr = -(a.nx * sx + a.ny * sy) / a.nz;
+          var rr = Math.sqrt(d2 + zr * zr);
+          if (rr >= rings.inner && rr <= rings.outer) {
+            var open = true;
+            for (var g = 0; g < gaps.length; g++) {
+              if (rr > gaps[g][0] && rr < gaps[g][1]) { open = false; break; }
+            }
+            if (open) {
+              var t = (rr - rings.inner) / (rings.outer - rings.inner);
+              var au = sx * a.ux + sy * a.uy + zr * a.uz;
+              var av = sx * a.vx + sy * a.vy + zr * a.vz;
+              c.ring[k] = 1;
+              c.zr[k] = zr;
+              c.cov0[k] = (0.55 + 0.45 * Math.sin(t * 8.2)) * (1 - 0.45 * t);
+              c.ringAt[k] = Math.atan2(av, au);
+              c.ringPow[k] = Math.pow(rr, -1.5);
+              /* The planet's own shadow falling across the rings. */
+              var qL = sx * lx + sy * ly + zr * lz, shaded = 0;
+              if (qL < 0) {
+                var px = sx - qL * lx, py = sy - qL * ly, pz = zr - qL * lz;
+                if (px * px + py * py + pz * pz < 1) shaded = 1;
+              }
+              c.shadow[k] = shaded;
+            }
+          }
+        }
+      }
+    }
+    return c;
+  }
+
+  /* One frame of body `b`, turned to `angle` radians. Comes back as rows of
+     glyphs joined by newlines, with no trailing newline: exactly what a <pre>
+     wants. Frames can be drawn in any order, since nothing carries over from
+     one to the next except the view cache, which depends on the body and not
+     on the angle. That is what makes scrubbing and the --once exports work.
+
+     The whole function is one pass over the grid. Everything before the loop
+     is setup that would otherwise be recomputed at every glyph. */
+  function render(b, angle) {
+    if (!view || view.body !== b) view = see(b, view);
+    var c = view;
+    var W = b.cols, H = b.rows, extX = b.extX, extY = b.extY;
+    var lastIdx = RAMP.length - 1;
+
+    var a = axesOf(b);
+    var nx = a.nx, ny = a.ny, nz = a.nz, ux = a.ux, uy = a.uy, uz = a.uz;
+    var vx = a.vx, vy = a.vy, vz = a.vz;
+    var ca = Math.cos(angle), sa = Math.sin(angle);
+    var lx = LIGHT[0], ly = LIGHT[1], lz = LIGHT[2];
+    /* The two ring terms that are the same for every glyph in the frame:
+       how opaque the sheet looks at this tilt, and how bright it is lit. */
+    var ringFade = 0.55 + 0.45 * (1 - Math.abs(nz));
+    var ringBright = 0.88 * b.gain;
+
+    /* View space -> body space, for the lumpy body's ray search, which has
+       to look at the body as turned for this frame. It writes the direction
+       into _bx/_by/_bz and RETURNS the distance from the center, because the
+       search needs both and handing back a pair would allocate an object per
+       step: this runs once per bisection step per cell, and allocating there
+       would be all garbage collection and no work. */
     var _bx = 0, _by = 0, _bz = 0;
     function toBody(px, py, pz) {
       var L = Math.sqrt(px * px + py * py + pz * pz) || 1;
@@ -520,15 +653,17 @@ var Cosmos = (function () {
       var sy = (1 - 2 * (j + 0.5) / H) * extY;
 
       for (i = 0; i < W; i++) {
-        var sx = (2 * (i + 0.5) / W - 1) * extX;
-        var d2 = sx * sx + sy * sy;    // squared distance from the center
+        var k = j * W + i;
 
         /* ---- lit surface ----
-           How far along the ray the body is, if it is there at all. zs is that
-           depth, and -1e9 stands in for "nothing here", so the ring test
-           further down can compare against it without a special case. */
+           How bright the ground is under this glyph, and how far along the ray
+           it sits. zs is that depth, and -1e9 stands in for "nothing here", so
+           the ring test further down can compare against it without a special
+           case. */
         var sphere = -1, zs = -1e9, hit = false;
         if (b.rock) {
+          var sx = (2 * (i + 0.5) / W - 1) * extX;
+          var d2 = sx * sx + sy * sy;
           /* Bisect down the ray: hi starts outside the bounding sphere, lo at
              the z=0 plane. Newton would take fewer steps but blows up near the
              silhouette where the surface is edge-on; bisection just works. */
@@ -537,7 +672,7 @@ var Cosmos = (function () {
             hi = Math.sqrt(hi);
             var lo = 0;
             if (toBody(sx, sy, 0) < radius(b, _bx, _by, _bz)) {
-              for (var k = 0; k < 9; k++) {
+              for (var q = 0; q < 9; q++) {
                 var mid = (lo + hi) * 0.5;
                 if (toBody(sx, sy, mid) < radius(b, _bx, _by, _bz)) lo = mid;
                 else hi = mid;
@@ -545,75 +680,70 @@ var Cosmos = (function () {
               zs = lo; hit = true;
             }
           }
-        } else if (d2 <= 1) {
-          zs = Math.sqrt(1 - d2); hit = true;
-        }
-
-        if (hit) {
-          var Lp = toBody(sx, sy, zs);
-          var nzv = zs / Lp;                        // cosine of the view angle
-          var lum = (sx / Lp) * lx + (sy / Lp) * ly + nzv * lz;
-          if (lum < 0) lum = 0;                     // turned away from the light
-          /* Rounding can hand back 1.0000000001 for a unit vector, and asin of
-             that is NaN, which paints as a hole in the planet. */
-          var by = clamp(_by, -1, 1);
-          var alb = b.tex(b, _bx, by, _bz, Math.asin(by), Math.atan2(_bz, _bx));
-          /* Lambert, softened. Straight cosine falls off far too fast for ten
-             shades: the terminator lands inside two or three characters and
-             the body reads as a paper cut-out. The (0.45 + 0.55 * lum) term
-             pulls the midtones apart again so the ramp has something to spend
-             its steps on. */
-          sphere = alb * (b.amb + (1 - b.amb) * lum * (0.45 + 0.55 * lum));
-          sphere *= (0.58 + 0.42 * nzv) * b.gain;   // limb darkening
+          if (hit) {
+            var Lp = toBody(sx, sy, zs);
+            var nzv = zs / Lp;                      // cosine of the view angle
+            var lum = (sx / Lp) * lx + (sy / Lp) * ly + nzv * lz;
+            if (lum < 0) lum = 0;                   // turned away from the light
+            /* Rounding can hand back 1.0000000001 for a unit vector, and asin
+               of that is NaN, which paints as a hole in the planet. */
+            var by = clamp(_by, -1, 1);
+            var alb = b.tex(b, _bx, by, _bz, Math.asin(by), Math.atan2(_bz, _bx));
+            /* Lambert, softened. Straight cosine falls off far too fast for
+               ten shades: the terminator lands inside two or three characters
+               and the body reads as a paper cut-out. The (0.45 + 0.55 * lum)
+               term pulls the midtones apart again so the ramp has something to
+               spend its steps on. */
+            sphere = alb * (b.amb + (1 - b.amb) * lum * (0.45 + 0.55 * lum));
+            sphere *= (0.58 + 0.42 * nzv) * b.gain;   // limb darkening
+          }
+        } else if (c.hit[k]) {
+          /* A smooth body: the view cache already has everything but the turn.
+             This is the same arithmetic as the block above, split at the point
+             where the angle comes in. */
+          hit = true;
+          zs = c.zs[k];
+          var p0 = c.b0[k], p1 = c.b1[k];
+          var tx = p0 * ca + p1 * sa, tz = p1 * ca - p0 * sa;
+          var albedo = b.tex(b, tx, c.by[k], tz, c.la[k], Math.atan2(tz, tx));
+          sphere = albedo * c.shade[k];
+          sphere *= c.limb[k];
         }
 
         /* ---- ring plane ----
            A translucent sheet, not a solid surface: a faint band crossing in
-           front of the planet has to composite over it, not replace it. */
+           front of the planet has to composite over it, not replace it. Rings
+           seen dead edge-on are a plane containing the viewer, with no sheet
+           left to hit, so see() leaves them out entirely. */
         var ringLum = 0, cov = 0, zr = -1e9;
-        /* Rings seen dead edge-on are a plane containing the viewer: there is
-           no sheet left to hit, and the division below would blow up. Skip. */
-        if (rings && Math.abs(nz) > 0.05) {
-          zr = -(nx * sx + ny * sy) / nz;
-          var rr = Math.sqrt(d2 + zr * zr);
-          if (rr >= rings.inner && rr <= rings.outer) {
-            var open = true;
-            for (var g = 0; g < gaps.length; g++) {
-              if (rr > gaps[g][0] && rr < gaps[g][1]) { open = false; break; }
-            }
-            if (open) {
-              var t = (rr - rings.inner) / (rings.outer - rings.inner);
-              cov = (0.55 + 0.45 * Math.sin(t * 8.2)) * (1 - 0.45 * t);
-
-              /* Azimuth measured in the rotating frame. Inner material shears
-                 ahead of outer on a Keplerian profile, so the density clumps
-                 wind up as the body turns. Without this the rings are
-                 radially symmetric and look frozen at every angle. */
-              var au = sx * ux + sy * uy + zr * uz;
-              var av = sx * vx + sy * vy + zr * vz;
-              var phi = Math.atan2(av, au) - angle * Math.pow(rr, -1.5) * 1.7;
-              cov *= 0.70 + 0.30 * (0.62 * Math.sin(phi * 2.0 + 0.4)
-                                  + 0.38 * Math.sin(phi * 5.0 - 1.1));
-              cov = clamp(cov, 0, 1) * (0.55 + 0.45 * (1 - Math.abs(nz)));
-              ringLum = 0.88 * b.gain;
-
-              /* The planet's own shadow falling across the rings. */
-              var qL = sx * lx + sy * ly + zr * lz;
-              if (qL < 0) {
-                var px = sx - qL * lx, py = sy - qL * ly, pz = zr - qL * lz;
-                if (px * px + py * py + pz * pz < 1) ringLum *= 0.16;
-              }
-            }
-          }
+        if (c.ringsShown && c.ring[k]) {
+          zr = c.zr[k];
+          /* Azimuth in the rotating frame. Inner material shears ahead of
+             outer on a Keplerian profile, so the density clumps wind up as the
+             body turns. Without this the rings are radially symmetric and look
+             frozen at every angle. */
+          var phi = c.ringAt[k] - angle * c.ringPow[k] * 1.7;
+          cov = c.cov0[k];
+          cov *= 0.70 + 0.30 * (0.62 * Math.sin(phi * 2.0 + 0.4)
+                              + 0.38 * Math.sin(phi * 5.0 - 1.1));
+          cov = clamp(cov, 0, 1) * ringFade;
+          ringLum = ringBright;
+          if (c.shadow[k]) ringLum *= 0.16;
         }
 
         /* ---- depth resolve ----
            Only two things can be under this glyph, and the ring wins when
            there is ring here at all and it is not hiding behind the planet.
            Even then it lets the surface through, in proportion to how thin the
-           ring happens to be at that radius. */
+           ring happens to be at that radius.
+
+           zs is -1e9 wherever the ray misses the body, so `zr > zs` already
+           covers open sky. It used to read (d2 > 1 || zr > zs), which assumed
+           the body ends at radius 1. A lumpy one does not, and every lump that
+           bulged past the unit circle had the rings drawn straight across it
+           even where they pass behind. */
         var back = sphere >= 0 ? sphere : 0;
-        var v = (cov > 0 && (d2 > 1 || zr > zs))
+        var v = (cov > 0 && zr > zs)
               ? ringLum * cov + back * (1 - cov)
               : back;
         /* And this is the line the whole file exists for: a brightness in
@@ -623,14 +753,19 @@ var Cosmos = (function () {
            drawn with. A dark enough patch of surface therefore used to come
            out indistinguishable from a gap in the planet, and on ice, whose
            fractures bottom out near zero, that punched visible holes clean
-           through the disk. Anything the ray actually struck gets at least
-           index 1, so the darkest ground is still ground.
+           through the disk. So ground that received any light at all gets at
+           least index 1, and the darkest lit ground is still ground.
 
-           Rings are deliberately left out of this. A ring thins to nothing at
-           its outer edge, and fading to sky there is the point; forcing a
-           glyph would draw a hard rim around something that has none. */
+           "Any light at all" is v > 0, and it matters. Ground that got none,
+           the night side with shadow turned all the way up, is meant to be as
+           black as the sky around it, and floored to a dot it would draw the
+           whole unlit disk as a stipple instead of leaving a crescent.
+
+           Rings are deliberately left out. A ring thins to nothing at its
+           outer edge, and fading to sky there is the point; forcing a glyph
+           would draw a hard rim around something that has none. */
         var idx = Math.round(clamp(v, 0, 1) * lastIdx);
-        if (idx === 0 && hit) idx = 1;
+        if (idx === 0 && hit && v > 0) idx = 1;
         line[i] = RAMP.charAt(idx);
       }
       out[j] = line.join('');

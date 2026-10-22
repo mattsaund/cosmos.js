@@ -11,6 +11,12 @@
    ring compositing, so the file stays readable instead of shipping
    every branch of the renderer.
 
+   Emitted lines are kept to 77 characters at most. That is partly
+   so the exported file reads well anywhere, and partly because the
+   source pane sizes its type so the longest line fits its column
+   (see .src in app.css): one longer line would shrink the type for
+   every planet, or set the pane scrolling sideways.
+
    Two things must hold or the exports drift away from the preview:
      - derived seeds are computed HERE and baked in as literals, so
        neither language has to reproduce JavaScript's int32 xor
@@ -38,16 +44,18 @@
      3. emit.js    textureJs()           the JavaScript export
      4. emit.js    parts()               which feature tables it needs
      5. app.js     SPEC texture options  so it can be picked
-     6. app.js     the Randomize list    so it can come up by chance
+
+   Randomize needs nothing: it picks from Cosmos.TEXTURES, so a
+   texture that exists can come up by chance.
 
    Nothing throws if one is missed. The export simply stops matching
    the preview, and only a careful look at both will say so.
 
-   Removing one is the same six places, plus two that only matter
+   Removing one is the same five places, plus two that only matter
    when a name stops existing:
 
-     7. planet.js  defaults().texture     if it was the opening one
-     8. planet.js  build()'s fall-through if it was the fallback
+     6. planet.js  defaults().texture     if it was the opening one
+     7. planet.js  build()'s fall-through if it was the fallback
    ============================================================ */
 var Emit = (function () {
   'use strict';
@@ -310,8 +318,10 @@ var Emit = (function () {
     L.push('                if lum < 0:');
     L.push('                    lum = 0.0');
     L.push('                byc = min(1.0, max(-1.0, by))');
-    L.push('                alb = texture(bx, byc, bz, math.asin(byc), math.atan2(bz, bx))');
-    L.push('                sphere = alb * (AMBIENT + (1 - AMBIENT) * lum * (0.45 + 0.55 * lum))');
+    L.push('                lat, lon = math.asin(byc), math.atan2(bz, bx)');
+    L.push('                alb = texture(bx, byc, bz, lat, lon)');
+    L.push('                soft = lum * (0.45 + 0.55 * lum)');
+    L.push('                sphere = alb * (AMBIENT + (1 - AMBIENT) * soft)');
     L.push('                sphere *= (0.58 + 0.42 * nzv) * GAIN      # limb darkening');
     L.push('');
     L.push('            ring_lum, cov, zr = 0.0, 0.0, -1e9');
@@ -321,7 +331,8 @@ var Emit = (function () {
       L.push('            if abs(nz) > 0.05:');
       L.push('                zr = -(nx * sx + ny * sy) / nz');
       L.push('                rr = math.sqrt(d2 + zr * zr)');
-      L.push('                if RING_IN <= rr <= RING_OUT and not any(a < rr < b for a, b in RING_GAPS):');
+      L.push('                in_ring = RING_IN <= rr <= RING_OUT');
+      L.push('                if in_ring and not any(a < rr < b for a, b in RING_GAPS):');
       L.push('                    t = (rr - RING_IN) / (RING_OUT - RING_IN)');
       L.push('                    cov = (0.55 + 0.45 * math.sin(t * 8.2)) * (1 - 0.45 * t)');
       L.push('                    # Inner material shears ahead of outer on a Keplerian');
@@ -332,7 +343,8 @@ var Emit = (function () {
       L.push('                    phi = math.atan2(av, au) - angle * (rr ** -1.5) * 1.7');
       L.push('                    cov *= 0.70 + 0.30 * (0.62 * math.sin(phi * 2.0 + 0.4)');
       L.push('                                        + 0.38 * math.sin(phi * 5.0 - 1.1))');
-      L.push('                    cov = min(1.0, max(0.0, cov)) * (0.55 + 0.45 * (1 - abs(nz)))');
+      L.push('                    cov = min(1.0, max(0.0, cov))');
+      L.push('                    cov *= 0.55 + 0.45 * (1 - abs(nz))');
       L.push('                    ring_lum = 0.88 * GAIN');
       L.push('                    ql = sx * lx + sy * ly + zr * lz     # planet shadow');
       L.push('                    if ql < 0:');
@@ -342,16 +354,17 @@ var Emit = (function () {
     }
     L.push('');
     L.push('            back = sphere if sphere >= 0 else 0.0');
-    L.push('            if cov > 0 and (d2 > 1 or zr > zs):');
+    L.push('            if cov > 0 and zr > zs:        # ring in front of the body');
     L.push('                v = ring_lum * cov + back * (1 - cov)');
     L.push('            else:');
     L.push('                v = back');
     L.push('            # int(x + 0.5), not round(): Python rounds half to even and');
     L.push('            # would pick a different glyph than the JavaScript original.');
     L.push('            idx = int(min(1.0, max(0.0, v)) * last + 0.5)');
-    L.push('            # RAMP[0] is a space, the same glyph as empty sky, so the');
-    L.push('            # darkest ground would read as a hole in the planet.');
-    L.push('            if idx == 0 and hit:');
+    L.push('            # RAMP[0] is a space, the same glyph as empty sky, so lit');
+    L.push('            # ground that rounds to it would read as a hole. Unlit');
+    L.push('            # ground stays black, which is what draws a crescent.');
+    L.push('            if idx == 0 and hit and v > 0:');
     L.push('                idx = 1');
     L.push('            line.append(RAMP[idx])');
     L.push('        rows.append("".join(line))');
@@ -477,8 +490,8 @@ var Emit = (function () {
     /* -- header comment, and every constant this planet needs -- */
     L.push('/* ASCII ' + c.texture + ' planet, generated by cosmos.js.');
     L.push('');
-    L.push('   Self-contained: no imports, no dependencies. In a browser, point it');
-    L.push('   at a <pre> and call animate(). Under Node, call frame(0) and print.');
+    L.push('   Self-contained: no imports, no dependencies. In a browser it appends');
+    L.push('   a <pre> to the page and animates it. Under Node it prints one frame.');
     L.push('*/');
     L.push('var RAMP = "' + Cosmos.RAMP + '";');
     L.push('var COLS = ' + i(b.cols) + ', ROWS = ' + i(b.rows) + ';');
@@ -661,7 +674,8 @@ var Emit = (function () {
     L.push('        if (lum < 0) lum = 0;');
     L.push('        var by = Math.min(1, Math.max(-1, _by));');
     L.push('        var alb = texture(_bx, by, _bz, Math.asin(by), Math.atan2(_bz, _bx));');
-    L.push('        sphere = alb * (AMBIENT + (1 - AMBIENT) * lum * (0.45 + 0.55 * lum));');
+    L.push('        var soft = lum * (0.45 + 0.55 * lum);');
+    L.push('        sphere = alb * (AMBIENT + (1 - AMBIENT) * soft);');
     L.push('        sphere *= (0.58 + 0.42 * nzv) * GAIN;   // limb darkening');
     L.push('      }');
     L.push('');
@@ -675,7 +689,8 @@ var Emit = (function () {
       L.push('        if (rr >= RING_IN && rr <= RING_OUT) {');
       L.push('          var open = true;');
       L.push('          for (var g = 0; g < RING_GAPS.length; g++) {');
-      L.push('            if (rr > RING_GAPS[g][0] && rr < RING_GAPS[g][1]) { open = false; break; }');
+      L.push('            var gl = RING_GAPS[g][0], gh = RING_GAPS[g][1];');
+      L.push('            if (rr > gl && rr < gh) { open = false; break; }');
       L.push('          }');
       L.push('          if (open) {');
       L.push('            var t = (rr - RING_IN) / (RING_OUT - RING_IN);');
@@ -687,7 +702,8 @@ var Emit = (function () {
       L.push('            var phi = Math.atan2(av, au) - angle * Math.pow(rr, -1.5) * 1.7;');
       L.push('            cov *= 0.70 + 0.30 * (0.62 * Math.sin(phi * 2.0 + 0.4)');
       L.push('                                + 0.38 * Math.sin(phi * 5.0 - 1.1));');
-      L.push('            cov = Math.min(1, Math.max(0, cov)) * (0.55 + 0.45 * (1 - Math.abs(nz)));');
+      L.push('            cov = Math.min(1, Math.max(0, cov));');
+      L.push('            cov *= 0.55 + 0.45 * (1 - Math.abs(nz));');
       L.push('            ringLum = 0.88 * GAIN;');
       L.push('            var ql = sx * lx + sy * ly + zr * lz;    // planet shadow');
       L.push('            if (ql < 0) {');
@@ -700,13 +716,14 @@ var Emit = (function () {
     }
     L.push('');
     L.push('      var back = sphere >= 0 ? sphere : 0;');
-    L.push('      var v = (cov > 0 && (d2 > 1 || zr > zs))');
+    L.push('      var v = (cov > 0 && zr > zs)       // ring in front of the body');
     L.push('            ? ringLum * cov + back * (1 - cov)');
     L.push('            : back;');
     L.push('      var idx = Math.round(Math.min(1, Math.max(0, v)) * last);');
-    L.push('      // RAMP[0] is a space, the same glyph as empty sky, so the');
-    L.push('      // darkest ground would read as a hole in the planet.');
-    L.push('      if (idx === 0 && hit) idx = 1;');
+    L.push('      // RAMP[0] is a space, the same glyph as empty sky, so lit');
+    L.push('      // ground that rounds to it would read as a hole. Unlit');
+    L.push('      // ground stays black, which is what draws a crescent.');
+    L.push('      if (idx === 0 && hit && v > 0) idx = 1;');
     L.push('      line.push(RAMP.charAt(idx));');
     L.push('    }');
     L.push('    out.push(line.join(""));');

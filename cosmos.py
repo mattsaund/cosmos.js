@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cosmos.js - ASCII planet generator.
+"""cosmos.js: ASCII planet generator.
 
     python3 cosmos.py
 

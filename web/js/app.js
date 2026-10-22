@@ -19,8 +19,10 @@
             paint()    draw one frame into the <pre>
             code()     re-emit both source panes
 
-   Size and color skip rebuild(): they change how a frame is
+   Color and spin skip rebuild(): they change how a frame is
    painted, not what is in it. They carry `preview: true` in SPEC.
+   Font size does not: it decides how many rows the grid has, and
+   that is a different body.
 
    Running alongside all of that, tick() sits on
    requestAnimationFrame forever, moves the angle on by however much
@@ -35,7 +37,7 @@
      SPEC ............ every control, as one list of data
      build ........... turns SPEC into DOM
      sync ............ cfg -> controls
-     render loop ..... rebuild / sizing / paint / tick
+     render loop ..... rebuild, sizing, pacing, paint, tick
      highlight ....... a small tokenizer for the two source panes
      code panes ...... emit and tab switching
      copy ............ the clipboard helper, shared by both buttons
@@ -80,9 +82,13 @@
        name      the row's caption: above the control, or beside it for a
                  check or the color swatch
        type      range | select | check | color | seg | number
-       min, max  the real range a range control spans. The page always shows
-                 0 to 100; fromSlider maps the position onto this
-       fmt       how a number box reads out beside its label
+       min, max  the real range a range control spans. The page shows 0 to
+                 100 and fromSlider maps the position onto this, unless:
+       real      the slider carries its own value rather than a position, for
+                 the two settings whose numbers mean something on sight: a
+                 font size in px and a count of craters. A brightness of 1.35
+                 does not read as anything, so it stays a position
+       fmt       how a real slider or a number box reads out
        invert    the slider runs backward against the value it writes
        preview   cheap: repaint, but do not rebuild the body
        when      only show this row while cfg[when] is truthy
@@ -98,7 +104,8 @@
        the grid always fills the panel: a smaller glyph is simply more of them.
        rebuild() turns this into a row count, so the number on the slider is
        the number of pixels a character actually gets. */
-    { key: 'size', name: 'font size', type: 'range', min: 4, max: 40 },
+    { key: 'size', name: 'font size', type: 'range', min: 4, max: 40, real: true,
+      fmt: function (v) { return Math.round(v) + ' px'; } },
     /* How much of the panel the body fills, from a speck to the whole thing.
        It stops at 1 on purpose: past that the planet would run off its own
        frame and get cut, and the frame is the picture. Unlike font size this
@@ -112,7 +119,7 @@
     /* Writes ambient light, but reads as its opposite: more shadow is less
        light on the night side. See toSlider/fromSlider. */
     { key: 'ambient', name: 'shadow', type: 'range', min: 0, max: 0.6, invert: true },
-    { key: 'craters', name: 'crater count', type: 'range', min: 0, max: 45 },
+    { key: 'craters', name: 'crater count', type: 'range', min: 0, max: 45, real: true },
     { key: 'lumpiness', name: 'lumpiness', type: 'range', min: 0, max: 1.4 },
     { key: 'tilt', name: 'tilt', type: 'range', min: -1.3, max: 1.3 },
     { key: 'roll', name: 'roll', type: 'range', min: -1.6, max: 1.6 },
@@ -129,7 +136,10 @@
       options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
     { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, when: 'spin' },
     { key: 'color', name: 'color', type: 'color', preview: true },
-    { key: 'seed', name: 'seed', type: 'number', min: 0, step: 1,
+    /* A number box, so it carries the value itself, never a 0 to 100
+       position. The top is the PRNG's own: seeds are read as unsigned 32 bit,
+       so anything past it would just wrap round to a smaller one. */
+    { key: 'seed', name: 'seed', type: 'number', min: 0, max: 4294967295, step: 1,
       fmt: function (v) { return String(Math.round(v)); } }
   ];
 
@@ -144,12 +154,14 @@
   var SLIDER_MAX = 100;
 
   function toSlider(c, v) {
+    if (c.real) return Math.round(v);                   // carries its own value
     var t = (v - c.min) / (c.max - c.min);              // real value as 0..1
     if (c.invert) t = 1 - t;
     return Math.round(clamp01(t) * SLIDER_MAX);
   }
 
   function fromSlider(c, p) {
+    if (c.real) return p;
     var t = clamp01(p / SLIDER_MAX);
     if (c.invert) t = 1 - t;
     return c.min + t * (c.max - c.min);
@@ -202,9 +214,12 @@
     if (c.type === 'range') {
       input = document.createElement('input');
       input.type = 'range';
-      /* Always 0 to 100 on the page. fromSlider turns the position back into
-         whatever the renderer actually wants. */
-      input.min = 0; input.max = SLIDER_MAX; input.step = 1;
+      /* 0 to 100 on the page, and fromSlider turns the position back into
+         whatever the renderer wants. A `real` control keeps its own range, so
+         the number under the thumb is the setting itself. */
+      input.min = c.real ? c.min : 0;
+      input.max = c.real ? c.max : SLIDER_MAX;
+      input.step = 1;
     } else if (c.type === 'select') {
       input = document.createElement('select');
       c.options.forEach(function (o) {
@@ -221,7 +236,7 @@
     } else if (c.type === 'number') {
       input = document.createElement('input');
       input.type = 'number';
-      input.min = c.min; input.step = c.step;
+      input.min = c.min; input.max = c.max; input.step = c.step;
     } else if (c.type === 'seg') {
       input = document.createElement('div');
       input.className = 'seg';
@@ -254,11 +269,22 @@
 
     if (c.type === 'range' || c.type === 'number') {
       input.addEventListener('input', function () {
-        cfg[c.key] = fromSlider(c, Number(input.value));
+        var raw = Number(input.value);
+        /* A box being typed into can hold nothing, or half a number, which
+           Number() reads as 0 or NaN. Neither is a setting, so wait for the
+           next keystroke instead of redrawing a planet nobody asked for. */
+        if (input.value === '' || !isFinite(raw)) return;
+        /* Only a slider is a position to translate. A number box already holds
+           the value: running it through fromSlider too, as this once did, asked
+           for a max the seed did not have and stored NaN for every seed. */
+        cfg[c.key] = c.type === 'range'
+          ? fromSlider(c, raw)
+          : Math.min(c.max, Math.max(c.min, Math.floor(raw)));
         sync();
-        /* Size and color only touch how the preview is painted, so they can
-           skip rebuilding the body and re-emitting the code. */
-        if (c.preview) { paint(); code(); } else rebuild();
+        /* A `preview` setting only changes how the frame is painted, so it can
+           skip rebuilding the body. None of the sliders is one today, but the
+           check stays generic so a future one gets the cheap path for free. */
+        if (c.preview) { dress(); paint(); code(); } else rebuild();
       });
     } else if (c.type === 'select') {
       input.addEventListener('change', function () {
@@ -269,12 +295,12 @@
       input.addEventListener('change', function () {
         cfg[c.key] = input.checked;
         sync();
-        if (c.preview) { paint(); code(); } else rebuild();
+        if (c.preview) { dress(); paint(); code(); } else rebuild();
       });
     } else if (c.type === 'color') {
       input.addEventListener('input', function () {
         cfg[c.key] = input.value;
-        sync(); paint(); code();
+        sync(); dress(); paint(); code();
       });
     }
 
@@ -285,7 +311,7 @@
 
   /* Make the page agree with cfg. One way only: cfg is the truth. Called after
      anything that changes it, including the changes that come from code rather
-     than from a control - Randomize, Reset, the console hook - which is why it
+     than from a control (Randomize, Reset, the console hook), which is why it
      rewrites every row rather than just the one that moved. */
   function sync() {
     SPEC.forEach(function (c) {
@@ -314,7 +340,8 @@
            range reads 0 to 100 like every other one. A number box is the
            exception, since the number in it is the value itself. */
         else if (c.type === 'number') nd.val.textContent = c.fmt ? c.fmt(v) : String(v);
-        else nd.val.textContent = String(toSlider(c, v));
+        else nd.val.textContent = c.fmt ? c.fmt(toSlider(c, v))
+                                        : String(toSlider(c, v));
       }
 
       /* Ring radii are meaningless with the rings switched off. */
@@ -332,33 +359,45 @@
       nd.input.value = toSlider(nd.spec, cfg.ringOuter);
       nd.val.textContent = String(toSlider(nd.spec, cfg.ringOuter));
     }
+
+    wake();   // spin may have just come on, from a checkbox, Reset or the console
   }
 
   /* --- render loop ------------------------------------------ */
-  var angle = 0;    // how far the body has turned, in radians
-  var last = 0;     // timestamp of the previous frame; 0 while paused
+  var angle = 0;       // how far the body has turned, in radians
+  var last = 0;        // timestamp of the previous tick; 0 while the loop is parked
+  var painted = 0;     // timestamp of the last repaint while spinning
+  var gap = 0;         // milliseconds between repaints while spinning, see paceOf()
+  var drawPx = 8;      // the font size the art is drawn at, see fitIn()
+  var shown = '';      // the frame that is in the <pre> right now
+  var looping = false; // whether tick() is scheduled
 
   /* Re-derive the body from cfg, then repaint and re-emit. The expensive path:
      it re-scatters every feature and, for a lumpy body, re-measures the
      bounding radius over 800 directions. Fine on a slider drag, but that is
-     why the cheap settings are allowed to skip it. */
+     why the cheap settings are allowed to skip it.
+
+     The stage is measured once, here, and everything that hangs off its size
+     is settled at the same time. A frame then never has to ask the page for
+     its layout, which would be a style recalculation per frame for an answer
+     that only changes when this runs. */
   function rebuild() {
-    cfg.wide = stageShape();          // the frame is cut to the panel it fills
-    cfg.rows = rowsForSize(cfg.size);  // and the grid to the glyph size asked for
+    var box = stageBox();
+    cfg.wide = shapeOf(box);            // the frame is cut to the panel it fills
+    cfg.rows = rowsFor(box, cfg.size);  // and the grid to the glyph size asked for
     body = Cosmos.build(cfg);
+    drawPx = fitIn(box);
+    gap = paceOf();
+    dress();
     paint();
     code();
   }
 
-  /* The largest whole-pixel type this body can be drawn at and still fit the
-     stage whole. 0 means the panel has not been laid out yet, so there is
-     nothing to measure and nothing to say about it.
-
-     A wide ring system needs a frame several times the planet's own width, so
-     at anything but a small size the art is wider than the panel. Clipping it
-     was bad on its own, and a centered overflow is worse than a plain one: what
-     spills past the top and left edges cannot be scrolled to at all, so the
-     planet simply hung off an invisible box. */
+  /* The stage's inner box, in CSS px. Everything about the grid is measured
+     off this one rectangle: its shape becomes the frame's shape, its height
+     over the font size becomes the row count, and the two together decide
+     the size the glyphs are finally drawn at. Zero on either side means the
+     page is not laid out yet, which every caller checks for. */
   function stageBox() {
     var cs = getComputedStyle(stage);
     return { w: stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
@@ -369,8 +408,7 @@
      so the glyph grid covers the whole panel instead of a square box sitting
      inside it, which is what put a visible edge around the art and made zoom
      grow the body inside that edge rather than out to the window. */
-  function stageShape() {
-    var box = stageBox();
+  function shapeOf(box) {
     return (box.w > 0 && box.h > 0) ? box.w / box.h : 1;
   }
 
@@ -382,56 +420,118 @@
 
      Capped by a glyph budget rather than a row count, because the columns
      follow the panel's shape: the same rows cost twice as much in a panel
-     twice as wide. Past the cap the glyphs come out a little larger than the
-     slider asked for, which is a better failure than a frame that takes
-     longer to draw than the screen takes to refresh. */
-  var GLYPH_BUDGET = 60000;
+     twice as wide. Past the cap the glyphs come out larger than the slider
+     asked for, which is a better failure than a frame that takes longer to
+     draw than the screen takes to refresh. The budget is high enough that the
+     smallest font on the slider is reachable on a normal screen; it only
+     bites on a very large display.
 
-  function rowsForSize(px) {
-    var box = stageBox();
+     The row count is a whole number, so the glyph height can only land within
+     half a row of what was asked for: the error is px * px / (2 * height), a
+     fraction of a pixel at 6px and under a pixel at 40. Honoring the request
+     exactly would mean leaving up to a row of empty panel under the art,
+     which is the border this layout spent so long getting rid of. The slider
+     is a request, filled to within less than one glyph. */
+  var GLYPH_BUDGET = 180000;
+
+  function rowsFor(box, px) {
     if (!(box.w > 0 && box.h > 0)) return 24;   // nothing laid out to measure
     var cap = Math.sqrt(GLYPH_BUDGET * Cosmos.aspect() * box.h / box.w);
     return Math.max(6, Math.round(Math.min(box.h / px, cap)));
   }
 
-  /* The size the art is drawn at: whatever makes the grid fill the panel.
+  /* The size the art is actually drawn at: whatever makes the grid fill the
+     panel exactly. The font size slider chose the row count (rowsFor), and
+     this turns that count back into a pixel size, which is the requested one
+     to within half a row.
 
-     There is no slider for this any more, and that is the point. The grid is
-     already cut to the panel's shape, so every size below this one just leaves
-     a margin, and a control whose only job was to draw the planet smaller than
-     the window it sits in was the thing making it look boxed in.
+     Never smaller than the fit, and that is the point: the grid is cut to the
+     panel's shape, so any smaller size would just leave a margin, and a
+     margin around the art is what made the planet look boxed in.
 
      Not rounded to whole pixels either. Rounding down cost up to one pixel per
      row, which at a hundred rows is a hundred pixels of slack along the bottom
-     edge, and that slack is visible as exactly the border the planet is not
-     supposed to have. */
-  function fitSize() {
-    var box = stageBox();
+     edge, visible as exactly the border the planet is not supposed to have. */
+  function fitIn(box) {
     if (!(box.w > 0 && box.h > 0)) return 8;    // nothing laid out yet to measure
     return Math.max(2, Math.min(box.w / (body.cols * Cosmos.aspect()), box.h / body.rows));
   }
 
-  /* Draw the body at the current angle into the <pre>, and update the readout
-     beside it. Cheap enough to run every animation frame. */
-  function paint() {
-    out.style.fontSize = fitSize().toFixed(3) + 'px';
+  /* How long to wait between repaints while the planet turns.
+
+     The art can only show movement in whole glyphs, so repainting faster than
+     the surface crosses a glyph just draws the same picture again. At the
+     default speed the surface takes most of a tenth of a second to cross one,
+     and repainting sixty times a second regardless was spending most of a CPU
+     core redrawing frames that had not changed: the fans noticed. So this
+     paces repaints at two per glyph crossing at the fastest moving point,
+     never more often than the screen refreshes, and never less than four a
+     second.
+
+     The fastest point is the equator facing the viewer, out at the body's
+     furthest reach for a lumpy one, or the inner edge of the rings, whose
+     material outruns the surface by up to about 1.7 times (see the
+     Keplerian shear in planet.js). */
+  function paceOf() {
+    var spin = Math.abs(cfg.speed);                      // radians per second
+    var glyph = 2 * body.extX / body.cols;               // one column, in body radii
+    var reach = Math.max(body.max, body.rings ? 1.7 : 1);
+    var crossings = spin * reach / glyph;                // glyphs crossed per second
+    if (!(crossings > 0)) return 250;
+    return Math.min(250, Math.max(1000 / 60, 1000 / (2 * crossings)));
+  }
+
+  /* Everything about the <pre> except its text: the size and color the glyphs
+     are drawn in, and the grid readout laid over the top of the stage. These
+     only change on a rebuild or a new color, so they stay out of the per
+     frame path. */
+  function dress() {
+    out.style.fontSize = drawPx.toFixed(3) + 'px';
     out.style.color = cfg.color;
-    out.textContent = Cosmos.render(body, angle);
     dims.textContent = body.cols + ' x ' + body.rows + ' glyphs';
   }
 
-  /* The animation loop, running whether or not the planet is spinning.
+  /* Draw the body at the current angle into the <pre>. It writes only when the
+     frame actually differs from the one on screen: handing the page the same
+     text again still costs a full relayout of every glyph in it. The existing
+     text node is updated in place rather than replaced. */
+  function paint() {
+    var art = Cosmos.render(body, angle);
+    if (art === shown) return;
+    if (out.firstChild) out.firstChild.nodeValue = art;
+    else out.textContent = art;
+    shown = art;
+  }
+
+  /* The animation loop, scheduled only while the planet spins.
 
      The angle advances by real elapsed time rather than a fixed step, so a
-     slow frame does not slow the planet down. Clearing `last` while paused is
-     what stops it lurching forward by the whole pause the moment spin comes
-     back on. */
+     slow frame does not slow the planet down, and it advances on every tick
+     even when that tick does not repaint, so the pace in paceOf() never
+     changes how fast the planet turns, only how often it is drawn.
+
+     With spin off the loop stops outright rather than ticking over idle, and
+     wake() starts it again. Starting again from last = 0 is what stops the
+     planet lurching forward by the whole pause the moment spin comes back. */
   function tick(now) {
+    if (!cfg.spin) { looping = false; last = 0; return; }
     requestAnimationFrame(tick);
-    if (!cfg.spin) { last = now; return; }
     if (last) angle += (now - last) / 1000 * cfg.speed * cfg.direction;
     last = now;
+    /* Half a refresh of slack, so a 33ms pace lands on every second frame of
+       a 60Hz screen rather than drifting to every third. */
+    if (now - painted < gap - 8) return;
+    painted = now;
     paint();
+  }
+
+  /* Start the loop if the planet should be spinning and it is not already
+     running. Called from sync(), so any change that turns spin on, from a
+     checkbox to Reset to the console hook, brings the loop back. */
+  function wake() {
+    if (looping || !cfg.spin) return;
+    looping = true;
+    requestAnimationFrame(tick);
   }
 
   /* --- highlight ------------------------------------------- *
@@ -460,15 +560,15 @@
     py: [
       ['str', /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
       ['com', /#[^\n]*/],
-      ['kw',  /\b(?:and|as|break|class|continue|def|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)\b/],
-      ['fn',  /\b(?:abs|enumerate|float|int|len|list|max|min|print|range|round|str|sum|tuple|zip)\b/],
+      ['kw',  /\b(?:and|as|assert|break|class|continue|def|del|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|nonlocal|not|or|pass|raise|return|True|try|while|with|yield)\b/],
+      ['fn',  /\b(?:abs|any|enumerate|float|int|KeyboardInterrupt|len|list|max|min|print|range|round|str|sum|tuple|zip)\b/],
       ['num', /\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/]
     ],
     js: [
       ['str', /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
       ['com', /\/\*[\s\S]*?\*\/|\/\/[^\n]*/],
       ['kw',  /\b(?:break|case|catch|const|continue|default|delete|do|else|false|finally|for|function|if|in|instanceof|let|new|null|of|return|switch|this|throw|true|try|typeof|undefined|var|void|while)\b/],
-      ['fn',  /\b(?:Array|JSON|Math|Number|Object|String|console|document|parseFloat|parseInt|requestAnimationFrame|setTimeout|window)\b/],
+      ['fn',  /\b(?:Array|JSON|Math|Number|Object|String|console|document|parseFloat|parseInt|performance|requestAnimationFrame|setTimeout|window)\b/],
       ['num', /\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/]
     ]
   };
@@ -596,13 +696,6 @@
   var SHOT_W = 3840, SHOT_H = 2160;   // 4K, and the only size this offers
   var SHOT_PAD = 0.04;                // fraction of the frame kept as margin
 
-  /* Lay `text` out on a 4K canvas in `color` on black, and hand back the
-     canvas. Null if there is nothing to draw.
-
-     The type is sized from the canvas's own measurement of the glyph rather
-     than from Cosmos.aspect(). The two should agree, both being Paper Mono,
-     but it is the canvas doing the drawing, so it is the canvas that gets to
-     say whether the art fits. */
   /* The blank margin around the art, as [top, bottom, left, right] row and
      column indices, or null if there is no ink at all.
 
@@ -624,6 +717,13 @@
     return top < 0 ? null : [top, bottom, left, right];
   }
 
+  /* Lay `text` out on a 4K canvas in `color` on black, and hand back the
+     canvas. Null if there is nothing to draw.
+
+     The type is sized from the canvas's own measurement of the glyph rather
+     than from Cosmos.aspect(). The two should agree, both being Paper Mono,
+     but it is the canvas doing the drawing, so it is the canvas that gets to
+     say whether the art fits. */
   function shotCanvas(text, color) {
     var box = inkBox(text.split('\n'));
     if (!box) return null;                       // nothing drawn, nothing to save
@@ -696,7 +796,7 @@
   /* A whole planet at once. The ranges are hand-picked rather than the full
      travel of each slider: the point is that every roll looks like a body
      somebody might have designed on purpose. Hence lumpiness going high only
-     for rock, and a ringed planet being given a minimum tilt - rings seen
+     for rock, and a ringed planet being given a minimum tilt: rings seen
      exactly edge-on are a single line of glyphs. */
   document.getElementById('randomize').addEventListener('click', function () {
     var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
@@ -742,7 +842,7 @@
     return '#' + hex(f(h + 1 / 3)) + hex(f(h)) + hex(f(h - 1 / 3));
   }
 
-  /* Back to the defaults, opening extremes and all. */
+  /* Back to the opening planet, exactly as Cosmos.defaults() describes it. */
   document.getElementById('reset').addEventListener('click', function () {
     cfg = Cosmos.defaults();
     sync(); rebuild();
@@ -804,9 +904,8 @@
   });
 
   /* --- go --------------------------------------------------- */
-  sync();
+  sync();      // also starts the loop, since the planet opens spinning
   rebuild();
-  requestAnimationFrame(tick);
 
   /* The probe above can run before the webfont has arrived, in which case it
      describes the fallback and the grid is cut for the wrong glyph. Measure
