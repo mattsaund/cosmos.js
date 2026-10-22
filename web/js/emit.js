@@ -708,7 +708,9 @@ var Emit = (function () {
     /* -- driver: animates in a browser, prints one frame under Node -- */
     L.push('/* Browser driver. Give it a <pre> and it runs on wall-clock time. */');
     L.push('function animate(el) {');
-    L.push('  el.style.font = "12px/1 ui-monospace, monospace";');
+    /* Paper Mono first, since COLS was worked out against its glyph, with a
+       plain monospace behind it for anyone who does not have the font. */
+    L.push('  el.style.font = \'12px/1 "Paper Mono", monospace\';');
     L.push('  el.style.color = COLOR;');
     L.push('  el.style.whiteSpace = "pre";');
     L.push('  var t0 = performance.now();');

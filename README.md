@@ -38,7 +38,7 @@ Three ways out, all from the controls:
 
 - **Copy planet to clipboard** puts the frame on screen into your clipboard as
   plain text, ready to paste into anything.
-- **Save 4K screenshot** writes the same frame to a 3840x2160 PNG on black,
+- **Save screenshot** writes the same frame to a 3840x2160 PNG on black,
   trimmed and scaled so the planet fills the picture.
 - The **planet.py** and **planet.js** panes hold a standalone program that
   draws the planet you designed. Copy either one and run it anywhere.

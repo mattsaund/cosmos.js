@@ -3,7 +3,8 @@
 
    Dark, monospace-forward, deliberately plain. The planet is the
    only thing here meant to draw the eye, so everything around it
-   stays flat and quiet.
+   stays flat and quiet. The one exception is the syntax coloring
+   in the source panes, kept muted for the same reason.
 
    IN THIS FILE
      font ....... the one typeface, loaded from the repo
@@ -43,8 +44,9 @@
 /* --- tokens ------------------------------------------------- */
 
 :root {
-  /* Black and white, no hue anywhere. The planet is the only thing on the page
-     allowed a color, and it gets that from the picker. */
+  /* Black and white: no hue in the chrome anywhere. The planet gets its color
+     from the picker, and the source panes get the muted syntax inks at the
+     bottom of this file. Nothing else on the page is allowed one. */
   --bg:      #000000;
   --panel:   #0a0a0a;
   --panel-2: #131313;
@@ -255,7 +257,10 @@ button:hover { color: var(--accent); border-color: var(--accent); }
      its top-left corner outside the scrollable area, where it cannot be
      reached. safe centering falls back to start alignment in that case. */
   display: grid; place-items: safe center;
-  min-height: 420px; padding: 16px;
+  /* No padding. The art is cut to this box and drawn at the size that fills
+     it, so any padding here reads as a border around the planet. The frame
+     already carries room of its own, see ROOM in planet.js. */
+  min-height: 420px; padding: 0;
   background: var(--bg);
   border-radius: 0 0 var(--r) var(--r);
   overflow: auto;
@@ -293,5 +298,15 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 }
 .src.is-on { display: block; }
 .src code { color: inherit; font: inherit; }
+
+/* Syntax colors, and the one place the no-hue rule above is relaxed. A wall
+   of single-color source is exactly what highlighting was asked to fix, so
+   the panes get five muted inks: enough to tell a string from a keyword,
+   dull enough that the planet is still the brightest thing on the page. */
+.t-com { color: #5c5c5c; }   /* comments, quietest of the five */
+.t-str { color: #9fb288; }
+.t-kw  { color: #8ba6c4; }
+.t-fn  { color: #c2ae7c; }
+.t-num { color: #bb9095; }
 
 ::selection { background: var(--accent); color: #000; }

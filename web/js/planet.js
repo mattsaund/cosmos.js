@@ -296,8 +296,10 @@ var Cosmos = (function () {
   function defaults() {
     return {
       texture:   'rock',
-      rows:      24,        // glyph rows; columns follow from CHAR_ASPECT
-      size:      14,        // preview font size in px, ignored by the math
+      rows:      24,        // glyph rows; columns follow from CHAR_ASPECT.
+                            // app.js overwrites this from `size` before every
+                            // build, the way it does with `wide`
+      size:      6,         // glyph height in px; the row count comes from it
       brightness: 1.00,     // multiplies the shaded result
       ambient:   0.16,      // light on the night side
       craters:   15,
@@ -307,7 +309,8 @@ var Cosmos = (function () {
       lumpiness: 0.00,      // 0 is a perfect sphere
       tilt:      0.30,
       roll:      0.10,
-      zoom:      1.00,      // >1 moves the frame in, <1 pulls it back
+      zoom:      0.70,      // 1 is the body filling the frame, less pulls back
+      wide:      1.00,      // frame width over height; app.js fits it to the panel
       rings:     false,
       ringInner: 1.30,
       ringOuter: 2.30,
@@ -323,8 +326,9 @@ var Cosmos = (function () {
 
        tex, amb, gain             the shading; read at every glyph
        rows, cols                 the size of the character grid
-       extX, extY                 how much sky the frame covers, in body radii;
-                                  always equal, and never a function of angle
+       extX, extY                 how much sky the frame covers, in body radii.
+                                  Their ratio is the frame's shape on screen;
+                                  neither is ever a function of tilt or roll
        max                        bounding radius, for the ray search
        rock                       true if the body is lumpy enough to need
                                   that search at all
@@ -390,13 +394,31 @@ var Cosmos = (function () {
        frame is cut for the rings at their widest, whatever angle they are
        actually at. zoom is the control that takes it back. */
     var reach = b.rings ? Math.max(b.max, c.ringOuter) : b.max;
-    var MARGIN = 1.03;                    // a little air so nothing meets the edge
+    /* The hair of sky between the body and the frame edge at zoom 1, so the
+       outermost glyphs are not cut in half. zoom is a straight fraction of
+       that: 1 is the body as large as the panel will hold, and the slider
+       does not go past it, so the planet never runs off its own frame. */
+    var ROOM = 1.02;
     var zoom = c.zoom > 0 ? c.zoom : 1;   // a zero here would blow the frame up
-    b.extX = b.extY = reach * MARGIN / zoom;
-    /* A square frame in body radii is a square frame on screen only once the
-       glyph's own shape is divided out, which is what keeps the disk round
-       rather than an egg. */
-    b.cols = Math.max(8, Math.round(b.rows / CHAR_ASPECT));
+
+    /* The frame is cut to the shape of whatever it has to fill, which app.js
+       measures off the preview panel and passes in as `wide`. A square grid
+       in a wide panel is a box with dead space either side of it, and zooming
+       in then grows the body inside that box instead of filling the window.
+
+       Clamped because the grid is rows * wide columns wide: a window shaped
+       like a letterbox would otherwise ask for tens of thousands of glyphs
+       per frame to fill it. Past the clamp the art simply stops reaching the
+       side edges, which is the old behavior and no worse than it was. */
+    var wide = clamp(c.wide > 0 ? c.wide : 1, 0.25, 4);
+    b.cols = Math.max(8, Math.round(b.rows * wide / CHAR_ASPECT));
+
+    /* Vertical reach first, since that is the one the body has to fit inside,
+       then width from the column count that actually came out. Deriving extX
+       from `wide` directly would let the rounding above leave the disk very
+       slightly oval. */
+    b.extY = reach * ROOM / zoom;
+    b.extX = b.extY * (b.cols * CHAR_ASPECT / b.rows);
     return b;
   }
 

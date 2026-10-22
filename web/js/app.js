@@ -36,6 +36,7 @@
      build ........... turns SPEC into DOM
      sync ............ cfg -> controls
      render loop ..... rebuild / sizing / paint / tick
+     highlight ....... a small tokenizer for the two source panes
      code panes ...... emit and tab switching
      copy ............ the clipboard helper, shared by both buttons
      screenshot ...... the same frame, drawn into a 4K PNG
@@ -91,20 +92,19 @@
         ['rock', 'rock'], ['ice', 'ice'],
         ['gas', 'gas giant'], ['lava', 'lava'], ['desert', 'desert']
       ] },
-    { key: 'rows', name: 'resolution', type: 'range', min: 10, max: 100, step: 1,
-      fmt: function (v) { return Math.round(v) + ' rows'; } },
-    /* Whole pixels only: a half-pixel step buys nothing but a fussier readout.
-
-       The max here is only what the slider opens with. retuneSize() replaces it
-       with the largest type this body can be drawn at and still fit the stage,
-       which moves with the resolution and with the window. */
-    { key: 'size', name: 'font size', type: 'range', min: 5, max: 26, step: 1,
-      fmt: function (v) { return Math.round(v) + ' px'; }, preview: true },
-    /* Not the same thing as font size. That one sets how large the glyphs are
-       drawn; this one changes how much sky the grid covers, so the body grows
-       while the character count stays exactly where it is. It rides into both
-       exports through EXT_X and EXT_Y, so a zoomed planet exports zoomed. */
-    { key: 'zoom', name: 'zoom', type: 'range', min: 0.5, max: 3, step: 0.01 },
+    /* Glyph height, which is the only resolution control there is now that
+       the grid always fills the panel: a smaller glyph is simply more of them.
+       rebuild() turns this into a row count, so the number on the slider is
+       the number of pixels a character actually gets. */
+    { key: 'size', name: 'font size', type: 'range', min: 4, max: 40, step: 1,
+      fmt: function (v) { return Math.round(v) + ' px'; } },
+    /* How much of the panel the body fills, from a speck to the whole thing.
+       It stops at 1 on purpose: past that the planet would run off its own
+       frame and get cut, and the frame is the picture. Unlike font size this
+       changes no character counts at all, only how much sky each one covers,
+       and it rides into both exports through EXT_X and EXT_Y. */
+    { key: 'zoom', name: 'zoom', type: 'range', min: 0.08, max: 1, step: 0.01,
+      fmt: function (v) { return Math.round(v * 100) + '%'; } },
     /* The top of this range is well past the point where the lit side starts
        clipping to a solid block of '@'. That is deliberate: a blown out planet
        is a look, and the ramp only has ten steps to lose. */
@@ -135,18 +135,6 @@
     { key: 'seed', name: 'seed', type: 'number', min: 0, step: 1,
       fmt: function (v) { return String(Math.round(v)); } }
   ];
-
-  /* Open on the most detailed planet the sliders can make: resolution at the
-     top of its range, size at the bottom of its. Taken from the SPEC itself so
-     the two cannot drift apart if a range is ever retuned. */
-  function startExtremes(c) {
-    SPEC.forEach(function (sp) {
-      if (sp.key === 'rows') c.rows = sp.max;
-      if (sp.key === 'size') c.size = sp.min;
-    });
-    return c;
-  }
-  startExtremes(cfg);
 
   /* A slider can run the opposite way to the value it writes. Keeping the
      conversion in one pair of functions means the handler, the readout and the
@@ -326,8 +314,15 @@
      bounding radius over 800 directions. Fine on a slider drag, but that is
      why the cheap settings are allowed to skip it. */
   function rebuild() {
+    cfg.wide = stageShape();          // the frame is cut to the panel it fills
+    cfg.rows = rowsForSize(cfg.size);  // and the grid to the glyph size asked for
     body = Cosmos.build(cfg);
-    retuneSize();     // a different grid tops out at a different font size
+    /* What the glyphs actually came out at, which is the slider's own number
+       everywhere except the small end, where the budget in rowsForSize rounds
+       them up. sync() has already run by here, so this is the last word, and
+       it should be the true one rather than the one that was asked for. */
+    var box = stageBox();
+    if (box.h > 0) nodes.size.val.textContent = Math.round(box.h / body.rows) + ' px';
     paint();
     code();
   }
@@ -341,52 +336,65 @@
      was bad on its own, and a centered overflow is worse than a plain one: what
      spills past the top and left edges cannot be scrolled to at all, so the
      planet simply hung off an invisible box. */
-  function maxSize() {
+  function stageBox() {
     var cs = getComputedStyle(stage);
-    var w = stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    var h = stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
-    if (!(w > 0 && h > 0)) return 0;             // not laid out yet
-    return Math.floor(Math.min(w / (body.cols * Cosmos.aspect()), h / body.rows));
+    return { w: stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+             h: stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) };
   }
 
-  /* Point the font size slider's right-hand end at that measurement.
-
-     The cap used to be invisible. The slider ran to a fixed 26px, the painted
-     size was quietly held down to whatever fitted, and so past some point in
-     the travel the thumb kept moving and the planet did not. Where that point
-     fell depended on the resolution and on the window, which is a strange thing
-     for a slider to keep to itself: at the top of the resolution range it was a
-     stop or two in from the left. Moving the maximum instead means the far
-     right of the slider is always the biggest the preview can draw, whatever
-     the resolution. */
-  function retuneSize() {
-    var nd = nodes.size, top = maxSize();
-    if (!top) return;
-    top = Math.max(nd.spec.min, top);   // keep the range valid in a tiny window
-    nd.input.max = top;
-    if (cfg.size > top) cfg.size = top;
-    nd.input.value = cfg.size;
-    nd.val.textContent = nd.spec.fmt(cfg.size);
+  /* The panel's shape, width over height. Cosmos.build cuts the frame to this
+     so the glyph grid covers the whole panel instead of a square box sitting
+     inside it, which is what put a visible edge around the art and made zoom
+     grow the body inside that edge rather than out to the window. */
+  function stageShape() {
+    var box = stageBox();
+    return (box.w > 0 && box.h > 0) ? box.w / box.h : 1;
   }
 
-  /* What paint() actually draws at. With the slider retuned this is cfg.size
-     itself; the floor is the last resort for a window too small to fit the body
-     even at the slider's own minimum, which is the one case left where the
-     readout still has to admit it fitted something down. */
+  /* How many rows it takes to draw glyphs `px` tall down the panel.
+
+     The grid fills the panel, so the row count and the glyph size are two
+     readings of one number and only one of them needs a slider. The slider
+     carries the one a person can see.
+
+     Capped by a glyph budget rather than a row count, because the columns
+     follow the panel's shape: the same rows cost twice as much in a panel
+     twice as wide. Past the cap the glyphs come out a little larger than the
+     slider asked for, which is a better failure than a frame that takes
+     longer to draw than the screen takes to refresh. */
+  var GLYPH_BUDGET = 60000;
+
+  function rowsForSize(px) {
+    var box = stageBox();
+    if (!(box.w > 0 && box.h > 0)) return 24;   // nothing laid out to measure
+    var cap = Math.sqrt(GLYPH_BUDGET * Cosmos.aspect() * box.h / box.w);
+    return Math.max(6, Math.round(Math.min(box.h / px, cap)));
+  }
+
+  /* The size the art is drawn at: whatever makes the grid fill the panel.
+
+     There is no slider for this any more, and that is the point. The grid is
+     already cut to the panel's shape, so every size below this one just leaves
+     a margin, and a control whose only job was to draw the planet smaller than
+     the window it sits in was the thing making it look boxed in.
+
+     Not rounded to whole pixels either. Rounding down cost up to one pixel per
+     row, which at a hundred rows is a hundred pixels of slack along the bottom
+     edge, and that slack is visible as exactly the border the planet is not
+     supposed to have. */
   function fitSize() {
-    var top = maxSize();
-    return top ? Math.max(2, Math.min(cfg.size, top)) : cfg.size;
+    var box = stageBox();
+    if (!(box.w > 0 && box.h > 0)) return 8;    // nothing laid out yet to measure
+    return Math.max(2, Math.min(box.w / (body.cols * Cosmos.aspect()), box.h / body.rows));
   }
 
   /* Draw the body at the current angle into the <pre>, and update the readout
      beside it. Cheap enough to run every animation frame. */
   function paint() {
-    var fs = fitSize();
-    out.style.fontSize = fs.toFixed(2) + 'px';
+    out.style.fontSize = fitSize().toFixed(3) + 'px';
     out.style.color = cfg.color;
     out.textContent = Cosmos.render(body, angle);
-    dims.textContent = body.cols + ' x ' + body.rows + ' glyphs'
-                     + (fs < cfg.size - 0.05 ? '   fitted to ' + fs.toFixed(1) + 'px' : '');
+    dims.textContent = body.cols + ' x ' + body.rows + ' glyphs';
   }
 
   /* The animation loop, running whether or not the planet is spinning.
@@ -403,6 +411,68 @@
     paint();
   }
 
+  /* --- highlight ------------------------------------------- *
+     Enough of a tokenizer to color the two source panes, and no more. A
+     highlighting library would be the only dependency this project has, for a
+     job that comes to a handful of patterns when the only two languages it
+     will ever see are the two it writes itself.
+
+     Everything goes out escaped. The input is always our own emitter's
+     output, so there is nothing hostile in it, but escaping is what makes
+     that a property of the code rather than a thing to remember. */
+
+  function esc(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* First pattern to match at a position wins, so strings come before
+     comments and triple quotes before single ones. A # inside a Python string
+     is never read as a comment, because the scanner never lands inside a
+     string: the string rule swallows it whole.
+
+     Every group inside a rule must be non-capturing. The scanner joins these
+     into one alternation and finds the rule by group number, so a stray
+     capture would shift every index after it. */
+  var RULES = {
+    py: [
+      ['str', /"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
+      ['com', /#[^\n]*/],
+      ['kw',  /\b(?:and|as|break|class|continue|def|elif|else|except|False|finally|for|from|global|if|import|in|is|lambda|None|not|or|pass|raise|return|True|try|while|with|yield)\b/],
+      ['fn',  /\b(?:abs|enumerate|float|int|len|list|max|min|print|range|round|str|sum|tuple|zip)\b/],
+      ['num', /\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/]
+    ],
+    js: [
+      ['str', /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/],
+      ['com', /\/\*[\s\S]*?\*\/|\/\/[^\n]*/],
+      ['kw',  /\b(?:break|case|catch|const|continue|default|delete|do|else|false|finally|for|function|if|in|instanceof|let|new|null|of|return|switch|this|throw|true|try|typeof|undefined|var|void|while)\b/],
+      ['fn',  /\b(?:Array|JSON|Math|Number|Object|String|console|document|parseFloat|parseInt|requestAnimationFrame|setTimeout|window)\b/],
+      ['num', /\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/]
+    ]
+  };
+
+  /* Compiled once rather than once per emit: both panes are rebuilt on every
+     slider move, and building a regex this size per frame would show. */
+  var SCANNER = {};
+  Object.keys(RULES).forEach(function (lang) {
+    SCANNER[lang] = new RegExp(RULES[lang].map(function (r) {
+      return '(' + r[1].source + ')';
+    }).join('|'), 'g');
+  });
+
+  /* `src` as HTML, with every token wrapped in the span its rule names. */
+  function highlight(src, lang) {
+    var rules = RULES[lang], re = SCANNER[lang];
+    var out = '', last = 0, m, i;
+    re.lastIndex = 0;
+    while ((m = re.exec(src)) !== null) {
+      for (i = 1; i <= rules.length; i++) if (m[i] !== undefined) break;
+      out += esc(src.slice(last, m.index)) +
+             '<span class="t-' + rules[i - 1][0] + '">' + esc(m[0]) + '</span>';
+      last = m.index + m[0].length;
+    }
+    return out + esc(src.slice(last));
+  }
+
   /* --- code panes ------------------------------------------ */
   var panes = { py: document.querySelector('#pane-py code'),
                 js: document.querySelector('#pane-js code') };
@@ -411,8 +481,8 @@
   /* Both panes every time, not just the visible one. Emitting is a millisecond
      or two and doing both here keeps switching tabs instant. */
   function code() {
-    panes.py.textContent = Emit.python(cfg, body);
-    panes.js.textContent = Emit.javascript(cfg, body);
+    panes.py.innerHTML = highlight(Emit.python(cfg, body), 'py');
+    panes.js.innerHTML = highlight(Emit.javascript(cfg, body), 'js');
   }
 
   /* Tab switching, which is only ever a class on the tab and a class on the
@@ -651,7 +721,7 @@
 
   /* Back to the defaults, opening extremes and all. */
   document.getElementById('reset').addEventListener('click', function () {
-    cfg = startExtremes(Cosmos.defaults());
+    cfg = Cosmos.defaults();
     sync(); rebuild();
   });
 
@@ -671,7 +741,8 @@
     },
     frame: function (a) { return Cosmos.render(body, a || 0); },
     body: function () { return body; },
-    emit: Emit
+    emit: Emit,
+    highlight: highlight          // __cosmos.highlight(src, 'py' | 'js')
   };
 
   /* --- launcher handshake ---------------------------------- *
@@ -699,13 +770,14 @@
 
   /* --- resize ----------------------------------------------- */
 
-  /* maxSize() measures the stage, so a resized window changes both where the
-     slider tops out and what gets painted. Debounced because a drag fires this
-     continuously and each repaint is a full re-render of every glyph. */
+  /* A resized window is a differently shaped frame, so this is a full rebuild
+     rather than a repaint: the column count follows the panel now. Debounced
+     because a drag fires this continuously and a rebuild re-scatters every
+     feature. */
   var refit;
   window.addEventListener('resize', function () {
     clearTimeout(refit);
-    refit = setTimeout(function () { retuneSize(); paint(); }, 100);
+    refit = setTimeout(rebuild, 100);
   });
 
   /* --- go --------------------------------------------------- */
