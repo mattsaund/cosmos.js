@@ -8,6 +8,12 @@
 <!-- Relative on purpose: the same tag works when this is served from the
      repo root by cosmos.py and when the folder is dropped into a site. -->
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<!-- Fetched ahead of the stylesheet that asks for it. Without this the font
+     is not discovered until the CSS has parsed, which is a visible swap on a
+     page whose whole subject is the shape of a glyph. crossorigin is not
+     optional even same origin: fonts are always fetched in CORS mode, and a
+     preload without it is simply downloaded twice. -->
+<link rel="preload" href="fonts/paper-mono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -29,6 +35,12 @@
          the code panel is for. -->
     <div class="row row--center">
       <button type="button" id="copy-art">Copy planet to clipboard</button>
+    </div>
+    <!-- The same frame again, drawn into a canvas at 3840x2160 on black and
+         handed over as a PNG. Nothing is re-rendered: it is the glyphs that
+         were on screen, set large. -->
+    <div class="row row--center">
+      <button type="button" id="screenshot">Save 4K screenshot</button>
     </div>
   </section>
 

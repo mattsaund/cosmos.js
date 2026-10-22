@@ -6,8 +6,9 @@
    stays flat and quiet.
 
    IN THIS FILE
-     tokens ..... colors, fonts and the few measurements that more
-                  than one rule depends on
+     font ....... the one typeface, loaded from the repo
+     tokens ..... colors and the few measurements that more than
+                  one rule depends on
      layout ..... the three-panel grid, and how it folds up narrow
      controls ... one row per setting, plus the inputs they use
      preview .... the stage the planet sits in
@@ -16,6 +17,28 @@
    No preprocessor and no build step: this file is served exactly as
    it is written.
    ============================================================ */
+
+/* --- font ---------------------------------------------------
+   Paper Mono, served out of the repo rather than from a font CDN.
+   This tool is meant to work opened straight off the disk over
+   file://, where a request to a CDN simply fails, and a planet
+   drawn in a fallback font is not the planet that was designed.
+
+   One variable file carries every weight, so there is nothing to
+   choose between and only one request to make.
+
+   font-display: swap paints the page immediately in whatever
+   monospace the system has and swaps Paper Mono in when it lands.
+   That means the first frame can be measured against the wrong
+   glyph, which is why app.js measures again once
+   document.fonts.ready settles. */
+@font-face {
+  font-family: "Paper Mono";
+  src: url("../fonts/paper-mono.woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
 
 /* --- tokens ------------------------------------------------- */
 
@@ -35,9 +58,10 @@
   --accent:  #ffffff;   /* the "selected" ink, not a hue */
   --on-bg:   #1c1c1c;   /* fill behind a selected tab or toggle */
 
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono",
-          Menlo, Consolas, "Liberation Mono", monospace;
-  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* One typeface for the whole page, the planet included. The generic
+     monospace behind it is only what shows for the moment before the file
+     lands, never a second choice worth designing against. */
+  --font: "Paper Mono", monospace;
   --r: 4px;
 
   /* The app's own padding. The first row is sized against the window, so this
@@ -50,13 +74,23 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* On the root, not just on body: html sits outside body's reach, and the one
+   typeface rule should hold for the whole document rather than for most of
+   it. Everything below inherits from here. */
+html { font-family: var(--font); }
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.5 var(--sans);
+  font: 14px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Form controls do not inherit type from the page, so without this the
+   browser draws them in its own UI font and the one typeface rule springs a
+   leak at every slider readout and dropdown. */
+button, input, select, textarea, option { font-family: inherit; }
 
 /* --- layout -------------------------------------------------
    Controls hold a fixed column; the preview takes the rest and the
@@ -107,7 +141,7 @@ body {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--line);
-  font: 400 12px/1 var(--mono); color: var(--fg-3);
+  font: 400 12px/1 var(--font); color: var(--fg-3);
 }
 
 /* --- controls ----------------------------------------------- */
@@ -119,8 +153,8 @@ body {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   margin-bottom: 7px;
 }
-.ctl__name { font: 400 12px/1 var(--mono); letter-spacing: .02em; color: var(--fg-2); }
-.ctl__val  { font: 400 12px/1 var(--mono); color: var(--accent); }
+.ctl__name { font: 400 12px/1 var(--font); letter-spacing: .02em; color: var(--fg-2); }
+.ctl__val  { font: 400 12px/1 var(--font); color: var(--accent); }
 
 /* A flat track with a square thumb, to match the terminal feel. */
 input[type="range"] {
@@ -141,7 +175,7 @@ input[type="range"]:focus-visible { outline: 2px solid var(--accent); outline-of
 
 select, input[type="number"] {
   width: 100%; padding: 7px 9px;
-  font: 400 12.5px/1 var(--mono);
+  font: 400 12.5px/1 var(--font);
   color: var(--fg); background: var(--panel-2);
   border: 1px solid var(--line-2); border-radius: var(--r);
 }
@@ -164,7 +198,7 @@ input[type="color"]::-moz-color-swatch    { border: 0; border-radius: 2px; }
    matches .ctl__name so it reads like every other caption in the column. */
 .ctl__inline {
   display: inline-flex; align-items: center; gap: 7px;
-  font: 400 12px/1 var(--mono); letter-spacing: .02em;
+  font: 400 12px/1 var(--font); letter-spacing: .02em;
   color: var(--fg-2); cursor: pointer;
 }
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; }
@@ -174,7 +208,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .seg { display: flex; gap: 0; }
 .seg button {
   flex: 1; padding: 7px 0;
-  font: 400 12px/1 var(--mono);
+  font: 400 12px/1 var(--font);
   color: var(--fg-2); background: var(--panel-2);
   border: 1px solid var(--line-2); cursor: pointer;
 }
@@ -191,7 +225,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 }
 
 button {
-  font: 400 12px/1 var(--mono);
+  font: 400 12px/1 var(--font);
   color: var(--fg); background: var(--panel-2);
   border: 1px solid var(--line-2); border-radius: var(--r);
   padding: 8px 12px; cursor: pointer;
@@ -228,7 +262,7 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 }
 #out {
   margin: 0;
-  font-family: var(--mono);
+  font-family: var(--font);
   line-height: 1;
   white-space: pre;
   color: var(--accent);
@@ -252,7 +286,7 @@ button:hover { color: var(--accent); border-color: var(--accent); }
   display: none;
   margin: 0; padding: 14px;
   max-height: 460px; overflow: auto;
-  font: 400 12px/1.55 var(--mono);
+  font: 400 12px/1.55 var(--font);
   color: var(--fg-2);
   white-space: pre;
   tab-size: 4;

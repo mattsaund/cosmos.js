@@ -307,6 +307,7 @@ var Cosmos = (function () {
       lumpiness: 0.00,      // 0 is a perfect sphere
       tilt:      0.30,
       roll:      0.10,
+      zoom:      1.00,      // >1 moves the frame in, <1 pulls it back
       rings:     false,
       ringInner: 1.30,
       ringOuter: 2.30,
@@ -322,7 +323,8 @@ var Cosmos = (function () {
 
        tex, amb, gain             the shading; read at every glyph
        rows, cols                 the size of the character grid
-       extX, extY                 how much sky the frame covers, in body radii
+       extX, extY                 how much sky the frame covers, in body radii;
+                                  always equal, and never a function of angle
        max                        bounding radius, for the ray search
        rock                       true if the body is lumpy enough to need
                                   that search at all
@@ -334,7 +336,6 @@ var Cosmos = (function () {
     var c = cfg || defaults();
     var lump = c.lumpiness || 0;
     var b = {
-      cfg:     c,
       tex:     TEXTURES[c.texture] || TEXTURES.rock,
       rows:    Math.max(6, Math.round(c.rows)),
       amb:     c.ambient,
@@ -376,27 +377,26 @@ var Cosmos = (function () {
       }
       b.max = m * 1.05;
     }
-    /* How far the body reaches along each screen axis, worked out separately:
-       a tilted ring system is wide and flat, and forcing a square frame around
-       it leaves the body swimming in empty sky above and below.
+    /* How much sky the frame covers, in body radii.
 
-       The rings lie in the plane perpendicular to the body's axis n, and
-       {u, v, n} is orthonormal, so a ring of radius r projects onto a screen
-       axis to exactly r * sqrt(1 - n_axis^2). Deriving the vertical extent from
-       tilt alone was the bug behind rings cut off top and bottom: roll turns the
-       axis within the view plane, so a rolled body at shallow tilt has rings
-       reaching nearly the full radius vertically, where the old formula
-       expected almost none of it. */
-    var axisX = -Math.sin(c.roll) * Math.cos(c.tilt);
-    var axisY = Math.cos(c.roll) * Math.cos(c.tilt);
-    var ringX = b.rings ? c.ringOuter * Math.sqrt(Math.max(0, 1 - axisX * axisX)) : 0;
-    var ringY = b.rings ? c.ringOuter * Math.sqrt(Math.max(0, 1 - axisY * axisY)) : 0;
+       Both axes get the same reach, and neither is a function of tilt or roll.
+       That is the whole point: the frame used to be fitted to the body's
+       projected silhouette, so every nudge of either slider resized the frame,
+       and the planet appeared to swell and shrink while the pole swung around.
+       It should sit still and turn, so the reach is measured in BODY space,
+       where turning the body changes nothing.
+
+       The price is a little empty sky beside a ring system seen edge on: the
+       frame is cut for the rings at their widest, whatever angle they are
+       actually at. zoom is the control that takes it back. */
+    var reach = b.rings ? Math.max(b.max, c.ringOuter) : b.max;
     var MARGIN = 1.03;                    // a little air so nothing meets the edge
-    b.extX = Math.max(b.max, ringX) * MARGIN;
-    b.extY = Math.max(b.max, ringY) * MARGIN;
-    /* Columns follow from the frame's aspect and the glyph's, so the disk comes
-       out round rather than as an egg. */
-    b.cols = Math.max(8, Math.round(b.rows * (b.extX / b.extY) / CHAR_ASPECT));
+    var zoom = c.zoom > 0 ? c.zoom : 1;   // a zero here would blow the frame up
+    b.extX = b.extY = reach * MARGIN / zoom;
+    /* A square frame in body radii is a square frame on screen only once the
+       glyph's own shape is divided out, which is what keeps the disk round
+       rather than an egg. */
+    b.cols = Math.max(8, Math.round(b.rows / CHAR_ASPECT));
     return b;
   }
 
@@ -604,10 +604,16 @@ var Cosmos = (function () {
     return out.join('\n');
   }
 
-  /* What the rest of the app can see. RAMP and LIGHT are out here because
-     emit.js bakes them into the generated source: one definition, three
-     programs. TEXTURES is exposed so the five names can be listed without
-     hard-coding them somewhere else. */
+  /* What the rest of the app can see.
+
+     RAMP and LIGHT are out here because emit.js bakes them into the generated
+     source, so there is one definition behind all three programs. That was
+     the intent from the start, but only LIGHT was wired up: emit.js carried
+     its own copy of the ramp string, and changing the ramp here would have
+     quietly left both exports drawing the old one.
+
+     TEXTURES is exposed so the list of names can be read rather than typed
+     out again, which is what Randomize does with it. */
   return {
     RAMP: RAMP,
     LIGHT: LIGHT,

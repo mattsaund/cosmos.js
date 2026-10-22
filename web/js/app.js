@@ -38,6 +38,7 @@
      render loop ..... rebuild / sizing / paint / tick
      code panes ...... emit and tab switching
      copy ............ the clipboard helper, shared by both buttons
+     screenshot ...... the same frame, drawn into a 4K PNG
      buttons ......... randomize and reset
      console hook .... window.__cosmos
      handshake ....... the ping that keeps cosmos.py alive
@@ -48,19 +49,25 @@
 
   /* --- font probe ------------------------------------------- */
 
-  /* Which monospace font resolves decides the glyph's advance, and the disk is
-     only round if the column count is derived from the real one. Measure it
-     off a throwaway <pre> rather than trusting the usual 0.6. */
-  (function measureAspect() {
+  /* The glyph's advance decides the column count, and the disk is only round
+     if that count is derived from the real one. Measure it off a throwaway
+     <pre> rather than trusting the usual 0.6.
+
+     The stack named here has to be the stack the planet is drawn in, or the
+     grid gets cut for a glyph nobody is looking at. Returns 0 if the page is
+     not far enough along to measure, which setAspect then ignores. */
+  var FONT = '"Paper Mono", monospace';
+  function measureAspect() {
     var probe = document.createElement('pre');
     probe.style.cssText = 'position:absolute;visibility:hidden;left:-9999px;top:0;' +
-                          'font:100px/1 ui-monospace, monospace;white-space:pre;margin:0';
+                          'font:100px/1 ' + FONT + ';white-space:pre;margin:0';
     probe.textContent = new Array(41).join('M');          // 40 glyphs
     document.body.appendChild(probe);
     var w = probe.getBoundingClientRect().width / 40;
     document.body.removeChild(probe);
-    if (w > 0) Cosmos.setAspect(w / 100);
-  })();
+    return w > 0 ? w / 100 : 0;
+  }
+  Cosmos.setAspect(measureAspect());
 
   var cfg = Cosmos.defaults();
   var body = Cosmos.build(cfg);
@@ -93,7 +100,15 @@
        which moves with the resolution and with the window. */
     { key: 'size', name: 'font size', type: 'range', min: 5, max: 26, step: 1,
       fmt: function (v) { return Math.round(v) + ' px'; }, preview: true },
-    { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 1.8, step: 0.01 },
+    /* Not the same thing as font size. That one sets how large the glyphs are
+       drawn; this one changes how much sky the grid covers, so the body grows
+       while the character count stays exactly where it is. It rides into both
+       exports through EXT_X and EXT_Y, so a zoomed planet exports zoomed. */
+    { key: 'zoom', name: 'zoom', type: 'range', min: 0.5, max: 3, step: 0.01 },
+    /* The top of this range is well past the point where the lit side starts
+       clipping to a solid block of '@'. That is deliberate: a blown out planet
+       is a look, and the ramp only has ten steps to lose. */
+    { key: 'brightness', name: 'brightness', type: 'range', min: 0.35, max: 3, step: 0.01 },
     /* Writes ambient light, but reads as its opposite: more shadow is less
        light on the night side. See toSlider/fromSlider. */
     { key: 'ambient', name: 'shadow', type: 'range', min: 0, max: 0.6, step: 0.01,
@@ -415,19 +430,37 @@
 
   /* --- copy ------------------------------------------------- */
 
+  /* A button that flashes a confirmation has to know what it said before.
+     Reading it on the first press and parking it on the element means the
+     answer comes from the page itself, so renaming a button in the HTML can
+     never leave this file holding a stale copy of its name. */
+  function restingLabel(btn) {
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent;
+    return btn.dataset.label;
+  }
+
+  /* Say `word` on `btn` for a beat, then put its own name back. */
+  function flash(btn, word) {
+    var label = restingLabel(btn);
+    btn.textContent = word;
+    setTimeout(function () { btn.textContent = label; }, 1200);
+  }
+
   /* Put `text` on the clipboard, then flash `btn` to say it worked and set it
-     back to `label` afterward. Both copy buttons come through here: Copy in
-     the code panel head, which takes whichever source pane is on show, and
-     Copy planet under the controls, which takes the art.
+     back afterward. Both copy buttons come through here: Copy in the code
+     panel head, which takes whichever source pane is on show, and Copy planet
+     under the controls, which takes the art.
+
+     The resting label is read off the button once and remembered on it. It
+     used to be passed in, and the copy in this file drifted out of step with
+     the HTML the moment the button was renamed, so a copied planet left the
+     button reading something the page had never said.
 
      navigator.clipboard needs a secure context, and this tool is meant to work
      opened straight off the disk over file://. Fall back to a scratch textarea
      and execCommand, which does not care. */
-  function copyToClipboard(text, btn, label) {
-    var done = function () {
-      btn.textContent = 'Copied';
-      setTimeout(function () { btn.textContent = label; }, 1200);
-    };
+  function copyToClipboard(text, btn) {
+    var done = function () { flash(btn, 'Copied'); };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(done, fallback);
     } else {
@@ -446,7 +479,7 @@
 
   var copyBtn = document.getElementById('copy');
   copyBtn.addEventListener('click', function () {
-    copyToClipboard(panes[current].textContent, copyBtn, 'Copy');
+    copyToClipboard(panes[current].textContent, copyBtn);
   });
 
   /* The planet as plain text, read back out of the <pre> rather than rendered
@@ -456,7 +489,114 @@
      this pastes into a text document as it stands. */
   var artBtn = document.getElementById('copy-art');
   artBtn.addEventListener('click', function () {
-    copyToClipboard(out.textContent, artBtn, 'Copy planet');
+    copyToClipboard(out.textContent, artBtn);
+  });
+
+  /* --- screenshot ------------------------------------------ *
+     The planet as a picture rather than as text: the frame that is on screen,
+     drawn large on black and handed over as a PNG.
+
+     Nothing is re-rendered. The glyphs come out of the <pre>, the same place
+     the copy button reads from, so the file and the clipboard always agree
+     about which frame they caught. */
+
+  var SHOT_W = 3840, SHOT_H = 2160;   // 4K, and the only size this offers
+  var SHOT_PAD = 0.04;                // fraction of the frame kept as margin
+
+  /* Lay `text` out on a 4K canvas in `color` on black, and hand back the
+     canvas. Null if there is nothing to draw.
+
+     The type is sized from the canvas's own measurement of the glyph rather
+     than from Cosmos.aspect(). The two should agree, both being Paper Mono,
+     but it is the canvas doing the drawing, so it is the canvas that gets to
+     say whether the art fits. */
+  /* The blank margin around the art, as [top, bottom, left, right] row and
+     column indices, or null if there is no ink at all.
+
+     Worth trimming rather than drawing as is. The frame deliberately carries
+     empty sky now that its reach no longer tracks the pole, and a ring system
+     seen edge on sits in a band through the middle of it. Saving that verbatim
+     spends most of a 4K canvas on black. */
+  function inkBox(lines) {
+    var top = -1, bottom = -1, left = Infinity, right = -1, i, a, b;
+    for (i = 0; i < lines.length; i++) {
+      a = lines[i].search(/\S/);
+      if (a < 0) continue;                       // a row of pure sky
+      b = lines[i].replace(/\s+$/, '').length - 1;
+      if (top < 0) top = i;
+      bottom = i;
+      if (a < left) left = a;
+      if (b > right) right = b;
+    }
+    return top < 0 ? null : [top, bottom, left, right];
+  }
+
+  function shotCanvas(text, color) {
+    var box = inkBox(text.split('\n'));
+    if (!box) return null;                       // nothing drawn, nothing to save
+    var lines = text.split('\n').slice(box[0], box[1] + 1).map(function (l) {
+      return l.slice(box[2], box[3] + 1);
+    });
+    var rows = lines.length, cols = box[3] - box[2] + 1, i;
+
+    var cv = document.createElement('canvas');
+    cv.width = SHOT_W;
+    cv.height = SHOT_H;
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, SHOT_W, SHOT_H);
+
+    /* Measured once at a reference size and scaled from there: the advance of
+       a monospace glyph is linear in the font size, so one measureText answers
+       for every size this might pick. */
+    var REF = 100;
+    ctx.font = REF + 'px ' + FONT;
+    var perPx = (ctx.measureText('M').width || REF * Cosmos.aspect()) / REF;
+    var size = Math.min(SHOT_W * (1 - SHOT_PAD) / (cols * perPx),
+                        SHOT_H * (1 - SHOT_PAD) / rows);
+
+    ctx.font = size + 'px ' + FONT;
+    ctx.fillStyle = color;
+    ctx.textBaseline = 'middle';
+    /* Line height 1, to match the <pre> on screen, so the art keeps the
+       proportions it was designed at. */
+    var x = (SHOT_W - cols * perPx * size) / 2;
+    var y = (SHOT_H - rows * size) / 2;
+    for (i = 0; i < rows; i++) ctx.fillText(lines[i], x, y + (i + 0.5) * size);
+    return cv;
+  }
+
+  var shotBtn = document.getElementById('screenshot');
+  shotBtn.addEventListener('click', function () {
+    /* Both read before anything async, so what gets saved is the frame that
+       was up when the button went down rather than one a few turns later. */
+    var text = out.textContent, color = cfg.color;
+
+    var save = function () {
+      var cv = shotCanvas(text, color);
+      if (!cv) return;
+      cv.toBlob(function (blob) {
+        if (!blob) return;
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'cosmos-' + cfg.texture + '-' + Math.round(cfg.seed) + '.png';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        /* Released on a later turn of the loop. Revoking it in the same tick
+           can beat the download to the file in some browsers. */
+        setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+        flash(shotBtn, 'Saved');
+      }, 'image/png');
+    };
+
+    /* A canvas draws in whatever font has arrived by then, so wait for the
+       webfont rather than saving a 4K picture of the fallback. Both arms of
+       the then() are the same call: a font that fails to load is still a
+       screenshot worth having. */
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(save, save);
+    else save();
   });
 
   /* --- buttons --------------------------------------------- */
@@ -468,7 +608,7 @@
   document.getElementById('randomize').addEventListener('click', function () {
     var pick = function (a) { return a[Math.floor(Math.random() * a.length)]; };
     var r = function (lo, hi) { return lo + Math.random() * (hi - lo); };
-    cfg.texture = pick(['rock', 'ice', 'gas', 'lava', 'desert']);
+    cfg.texture = pick(Object.keys(Cosmos.TEXTURES));
     cfg.seed = Math.floor(Math.random() * 1e9);
     cfg.craters = Math.round(r(4, 34));
     cfg.lumpiness = cfg.texture === 'rock' ? r(0.5, 1.2) : (Math.random() < 0.25 ? r(0.1, 0.5) : 0);
@@ -572,4 +712,18 @@
   sync();
   rebuild();
   requestAnimationFrame(tick);
+
+  /* The probe above can run before the webfont has arrived, in which case it
+     describes the fallback and the grid is cut for the wrong glyph. Measure
+     once more when the font settles, and rebuild only if it actually moved,
+     so the common case of a cached font costs nothing. */
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () {
+      var a = measureAspect();
+      if (a > 0 && Math.abs(a - Cosmos.aspect()) > 0.001) {
+        Cosmos.setAspect(a);
+        rebuild();
+      }
+    });
+  }
 })();

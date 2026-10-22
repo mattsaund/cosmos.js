@@ -114,7 +114,7 @@ var Emit = (function () {
     L.push('"""');
     L.push('import math, sys, time');
     L.push('');
-    L.push('RAMP = " .:-=+*#%@"');
+    L.push('RAMP = "' + Cosmos.RAMP + '"');
     L.push('COLS, ROWS = ' + i(b.cols) + ', ' + i(b.rows));
     L.push('EXT_X, EXT_Y = ' + n(b.extX) + ', ' + n(b.extY) + '   # frame half-size, in body radii');
     L.push('TILT, ROLL = ' + n(c.tilt) + ', ' + n(c.roll));
@@ -475,7 +475,7 @@ var Emit = (function () {
     L.push('   Self-contained: no imports, no dependencies. In a browser, point it');
     L.push('   at a <pre> and call animate(). Under Node, call frame(0) and print.');
     L.push('*/');
-    L.push('var RAMP = " .:-=+*#%@";');
+    L.push('var RAMP = "' + Cosmos.RAMP + '";');
     L.push('var COLS = ' + i(b.cols) + ', ROWS = ' + i(b.rows) + ';');
     L.push('var EXT_X = ' + n(b.extX) + ', EXT_Y = ' + n(b.extY) + ';   // frame half-size, in body radii');
     L.push('var TILT = ' + n(c.tilt) + ', ROLL = ' + n(c.roll) + ';');
