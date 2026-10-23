@@ -47,14 +47,14 @@
   </section>
 
   <!-- Preview. #dims reports the glyph grid. The planet itself is plain text
-       inside #out, which is the whole idea: no canvas, no images. Spin lives
-       over in the controls now, and only parks the angle: the loop in tick()
-       keeps running either way. -->
+       inside #out, which is the whole idea: no canvas, no images. To a screen
+       reader it is one picture with a name, rather than a few thousand
+       punctuation marks read out one by one. -->
   <section class="panel preview" aria-label="Preview">
     <div class="panel__head">
       <span id="dims" class="dim">-</span>
     </div>
-    <div class="stage"><pre id="out" aria-live="off"></pre></div>
+    <div class="stage"><pre id="out" role="img" aria-label="ASCII planet"></pre></div>
   </section>
 
   <!-- Generated code. Both panes are always filled by app.js; the tabs only
@@ -62,13 +62,16 @@
   <section class="panel code" aria-label="Generated code">
     <div class="panel__head">
       <div class="tabs" role="tablist">
-        <button type="button" role="tab" class="tab is-on" data-pane="py">planet.py</button>
-        <button type="button" role="tab" class="tab" data-pane="js">planet.js</button>
+        <button type="button" role="tab" class="tab is-on" data-pane="py"
+                aria-selected="true" aria-controls="pane-py">planet.py</button>
+        <button type="button" role="tab" class="tab" data-pane="js"
+                aria-selected="false" aria-controls="pane-js">planet.js</button>
       </div>
       <button type="button" id="copy">Copy</button>
     </div>
-    <pre class="src is-on" id="pane-py"><code></code></pre>
-    <pre class="src" id="pane-js"><code></code></pre>
+    <!-- tabindex so the panes can be scrolled from the keyboard as well. -->
+    <pre class="src is-on" id="pane-py" role="tabpanel" tabindex="0"><code></code></pre>
+    <pre class="src" id="pane-js" role="tabpanel" tabindex="0"><code></code></pre>
   </section>
 
 </main>

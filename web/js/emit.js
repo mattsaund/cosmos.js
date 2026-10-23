@@ -17,7 +17,10 @@
    (see .src in app.css): one longer line would shrink the type for
    every planet, or set the pane scrolling sideways.
 
-   Two things must hold or the exports drift away from the preview:
+   Three things must hold or the exports drift away from the preview:
+     - every number is written out in full, so it reads back in both
+       languages as exactly the double the preview drew with. Rounded
+       to look tidy, a constant moves a glyph here and there
      - derived seeds are computed HERE and baked in as literals, so
        neither language has to reproduce JavaScript's int32 xor
      - Python rounds half to even, JavaScript rounds half up, so the
@@ -62,16 +65,39 @@ var Emit = (function () {
 
   /* --- literals --------------------------------------------- */
 
-  /* A float, trimmed so the emitted source reads like something a person
-     wrote, without losing precision that would move a glyph. The trailing
-     ".0" is not decoration: it keeps a value that happens to land on a whole
-     number reading as a float in both languages. */
+  /* A float, written with exactly as many digits as it takes to read back as
+     the same double, which JavaScript's own number formatting already does.
+     Values from the sliders come out short (app.js keeps them to six
+     places); the few worked out in build() come out long, and have to: any
+     rounding here and the export draws a slightly different planet.
+
+     The trailing ".0" is not decoration: it keeps a value that happens to
+     land on a whole number reading as a float in both languages. */
   function n(v) {
-    var s = (Math.round(v * 1e6) / 1e6).toString();
+    var s = String(v);
     return s.indexOf('.') === -1 && s.indexOf('e') === -1 ? s + '.0' : s;
   }
   /* An integer: counts, grid sizes, seeds. */
   function i(v) { return String(Math.round(v)); }
+
+  /* `code` with `note` as a trailing comment, lined up on column `col` when
+     the code leaves room for it, and three spaces after the code when not.
+     Exact literals vary in length, so a fixed run of spaces would leave the
+     comments ragged. */
+  function noted(code, note, col) {
+    return code + new Array(Math.max(3, col - code.length) + 1).join(' ') + note;
+  }
+
+  /* The ring gaps as a literal list of pairs, read off the body rather than
+     typed out again here, so the gaps have one definition behind all three
+     programs. `pair` holds the brackets for one pair: '()' for Python, '[]'
+     for JavaScript. The outside is a list in both, so a ring system with a
+     single gap would still come out as a list of pairs. */
+  function gapList(gaps, pair) {
+    return '[' + gaps.map(function (g) {
+      return pair[0] + n(g[0]) + ', ' + n(g[1]) + pair[1];
+    }).join(', ') + ']';
+  }
 
   /* The seeds the renderer derives with xor. JavaScript's ^ works on int32 and
      can hand back a negative number, which the PRNG then reads as unsigned;
@@ -122,20 +148,26 @@ var Emit = (function () {
     L.push('"""');
     L.push('import math, sys, time');
     L.push('');
+    var COL = 28;   // where the comments on the constants line up
     L.push('RAMP = "' + Cosmos.RAMP + '"');
     L.push('COLS, ROWS = ' + i(b.cols) + ', ' + i(b.rows));
-    L.push('EXT_X, EXT_Y = ' + n(b.extX) + ', ' + n(b.extY) + '   # frame half-size, in body radii');
+    L.push('# Half the frame\'s width and height, in body radii.');
+    L.push('EXT_X, EXT_Y = ' + n(b.extX) + ', ' + n(b.extY));
     L.push('TILT, ROLL = ' + n(c.tilt) + ', ' + n(c.roll));
-    L.push('AMBIENT   = ' + n(c.ambient) + '   # light on the night side');
-    L.push('GAIN      = ' + n(c.brightness));
-    L.push('SPEED     = ' + n(c.speed * c.direction) + '   # radians per second');
-    L.push('LIGHT     = (' + n(Cosmos.LIGHT[0]) + ', ' + n(Cosmos.LIGHT[1]) + ', ' + n(Cosmos.LIGHT[2]) + ')   # key light, upper left');
-    if (p.rock) L.push('MAXR      = ' + n(b.max) + '   # bounding radius, measured not summed');
+    L.push(noted('AMBIENT = ' + n(c.ambient), '# light on the night side', COL));
+    L.push(noted('GAIN = ' + n(c.brightness), '# brightness', COL));
+    L.push(noted('SPEED = ' + n(c.speed * c.direction), '# radians per second', COL));
+    if (p.rock) {
+      L.push(noted('LUMP = ' + n(c.lumpiness), '# lumpiness, 0 is a sphere', COL));
+      L.push(noted('MAXR = ' + n(b.max), '# bounding radius, past every lump', COL));
+    }
     if (p.rings) {
       L.push('RING_IN, RING_OUT = ' + n(c.ringInner) + ', ' + n(c.ringOuter));
-      L.push('RING_GAPS = ((1.68, 1.78), (2.04, 2.09))');
+      L.push('RING_GAPS = ' + gapList(b.rings.gaps, '()'));
     }
-    L.push('COLOR     = (' + rgb.join(', ') + ')');
+    L.push('COLOR = (' + rgb.join(', ') + ')');
+    L.push('# The key light, upper left and toward the viewer.');
+    L.push('LIGHT = (' + n(Cosmos.LIGHT[0]) + ', ' + n(Cosmos.LIGHT[1]) + ', ' + n(Cosmos.LIGHT[2]) + ')');
     L.push('');
     L.push('');
     /* -- the PRNG, shared by everything that scatters -- */
@@ -211,10 +243,13 @@ var Emit = (function () {
     if (p.maria)   L.push('MARIA   = features(' + s.maria + ', 5, 0.40, 0.26)');
     if (p.cracks)  L.push('CRACKS  = circles(' + s.cracks + ', 8, 0.046, 0.042)');
     if (p.rock) {
-      L.push('SHAPE   = lobes(' + s.shape + ', 5, ' + n(0.105 * c.lumpiness) + ', ' + n(0.075 * c.lumpiness) + ', 0.50)');
-      L.push('FACETS  = lobes(' + s.facets + ', 14, ' + n(0.034 * c.lumpiness) + ', ' + n(0.042 * c.lumpiness) + ', 0.45)');
-      L.push('KNOBS   = lobes(' + s.knobs + ', 24, ' + n(0.018 * c.lumpiness) + ', ' + n(0.036 * c.lumpiness) + ', 0.45)');
-      L.push('ELONG   = ' + n(0.24 * c.lumpiness));
+      /* The amplitudes are worked out from LUMP in the export itself, the
+         same multiplication build() does, so they match to the last bit
+         without carrying seventeen digits each. */
+      L.push('SHAPE   = lobes(' + s.shape + ', 5, 0.105 * LUMP, 0.075 * LUMP, 0.50)');
+      L.push('FACETS  = lobes(' + s.facets + ', 14, 0.034 * LUMP, 0.042 * LUMP, 0.45)');
+      L.push('KNOBS   = lobes(' + s.knobs + ', 24, 0.018 * LUMP, 0.036 * LUMP, 0.45)');
+      L.push('ELONG   = 0.24 * LUMP');
     }
     L.push('');
     L.push('');
@@ -493,20 +528,26 @@ var Emit = (function () {
     L.push('   Self-contained: no imports, no dependencies. In a browser it appends');
     L.push('   a <pre> to the page and animates it. Under Node it prints one frame.');
     L.push('*/');
+    var COL = 34;   // where the comments on the constants line up
     L.push('var RAMP = "' + Cosmos.RAMP + '";');
     L.push('var COLS = ' + i(b.cols) + ', ROWS = ' + i(b.rows) + ';');
-    L.push('var EXT_X = ' + n(b.extX) + ', EXT_Y = ' + n(b.extY) + ';   // frame half-size, in body radii');
+    L.push('// Half the frame\'s width and height, in body radii.');
+    L.push('var EXT_X = ' + n(b.extX) + ', EXT_Y = ' + n(b.extY) + ';');
     L.push('var TILT = ' + n(c.tilt) + ', ROLL = ' + n(c.roll) + ';');
-    L.push('var AMBIENT = ' + n(c.ambient) + ';        // light on the night side');
-    L.push('var GAIN = ' + n(c.brightness) + ';');
-    L.push('var SPEED = ' + n(c.speed * c.direction) + ';          // radians per second');
-    L.push('var LIGHT = [' + n(Cosmos.LIGHT[0]) + ', ' + n(Cosmos.LIGHT[1]) + ', ' + n(Cosmos.LIGHT[2]) + '];  // key light, upper left');
-    if (p.rock) L.push('var MAXR = ' + n(b.max) + ';           // bounding radius, measured not summed');
+    L.push(noted('var AMBIENT = ' + n(c.ambient) + ';', '// light on the night side', COL));
+    L.push(noted('var GAIN = ' + n(c.brightness) + ';', '// brightness', COL));
+    L.push(noted('var SPEED = ' + n(c.speed * c.direction) + ';', '// radians per second', COL));
+    if (p.rock) {
+      L.push(noted('var LUMP = ' + n(c.lumpiness) + ';', '// lumpiness, 0 is a sphere', COL));
+      L.push(noted('var MAXR = ' + n(b.max) + ';', '// bounding radius, past every lump', COL));
+    }
     if (p.rings) {
       L.push('var RING_IN = ' + n(c.ringInner) + ', RING_OUT = ' + n(c.ringOuter) + ';');
-      L.push('var RING_GAPS = [[1.68, 1.78], [2.04, 2.09]];');
+      L.push('var RING_GAPS = ' + gapList(b.rings.gaps, '[]') + ';');
     }
     L.push('var COLOR = "' + c.color + '";');
+    L.push('// The key light, upper left and toward the viewer.');
+    L.push('var LIGHT = [' + n(Cosmos.LIGHT[0]) + ', ' + n(Cosmos.LIGHT[1]) + ', ' + n(Cosmos.LIGHT[2]) + '];');
     L.push('');
     /* -- the PRNG, shared by everything that scatters -- */
     L.push('/* Linear congruential generator: same seed, same craters, every run. */');
@@ -570,10 +611,10 @@ var Emit = (function () {
     if (p.maria)   L.push('var MARIA = features(' + s.maria + ', 5, 0.40, 0.26);');
     if (p.cracks)  L.push('var CRACKS = circles(' + s.cracks + ', 8, 0.046, 0.042);');
     if (p.rock) {
-      L.push('var SHAPE = lobes(' + s.shape + ', 5, ' + n(0.105 * c.lumpiness) + ', ' + n(0.075 * c.lumpiness) + ', 0.50);');
-      L.push('var FACETS = lobes(' + s.facets + ', 14, ' + n(0.034 * c.lumpiness) + ', ' + n(0.042 * c.lumpiness) + ', 0.45);');
-      L.push('var KNOBS = lobes(' + s.knobs + ', 24, ' + n(0.018 * c.lumpiness) + ', ' + n(0.036 * c.lumpiness) + ', 0.45);');
-      L.push('var ELONG = ' + n(0.24 * c.lumpiness) + ';');
+      L.push('var SHAPE = lobes(' + s.shape + ', 5, 0.105 * LUMP, 0.075 * LUMP, 0.50);');
+      L.push('var FACETS = lobes(' + s.facets + ', 14, 0.034 * LUMP, 0.042 * LUMP, 0.45);');
+      L.push('var KNOBS = lobes(' + s.knobs + ', 24, 0.018 * LUMP, 0.036 * LUMP, 0.45);');
+      L.push('var ELONG = 0.24 * LUMP;');
     }
     L.push('');
     /* -- the albedo function for this one texture -- */
@@ -732,17 +773,21 @@ var Emit = (function () {
     L.push('}');
     L.push('');
     /* -- driver: animates in a browser, prints one frame under Node -- */
-    L.push('/* Browser driver. Give it a <pre> and it runs on wall-clock time. */');
+    L.push('/* Browser driver. Give it a <pre> and it runs on wall-clock time,');
+    L.push('   redrawing about 30 times a second like the Python version: the art');
+    L.push('   moves in whole glyphs, so drawing it more often is mostly wasted. */');
     L.push('function animate(el) {');
     /* Paper Mono first, since COLS was worked out against its glyph, with a
        plain monospace behind it for anyone who does not have the font. */
     L.push('  el.style.font = \'12px/1 "Paper Mono", monospace\';');
     L.push('  el.style.color = COLOR;');
     L.push('  el.style.whiteSpace = "pre";');
-    L.push('  var t0 = performance.now();');
+    L.push('  var t0 = performance.now(), drawn = -Infinity;');
     L.push('  (function tick(now) {');
-    L.push('    el.textContent = frame((now - t0) / 1000 * SPEED);');
     L.push('    requestAnimationFrame(tick);');
+    L.push('    if (now - drawn < 30) return;');
+    L.push('    drawn = now;');
+    L.push('    el.textContent = frame((now - t0) / 1000 * SPEED);');
     L.push('  })(t0);');
     L.push('}');
     L.push('');

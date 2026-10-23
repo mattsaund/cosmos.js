@@ -55,6 +55,10 @@ Three ways out:
 - The **planet.py** and **planet.js** panes hold a standalone program that
   draws the planet you designed. Copy either one and run it anywhere.
 
+The programs draw the same glyph grid as the preview, whose size is shown in
+its top corner. To run one in a terminal, raise the font size until the grid
+fits the window.
+
 ## Contributing
 
 Issues and pull requests are welcome.

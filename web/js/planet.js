@@ -14,13 +14,15 @@
    ------------------------------------------------------------
    HOW A FRAME HAPPENS
 
-     build(cfg)     Run once, when a setting changes. Scatters the
+     build(cfg, grid)
+                    Run once, when a setting changes. Scatters the
                     craters, fractures and lumps out of the seed,
-                    measures how much sky the body needs, and picks
-                    a column count that keeps the disk round.
-                    Hands back a "body": everything render() needs.
+                    measures how much sky the body needs, and cuts
+                    the frame to the grid the page asked for, with a
+                    column count that keeps the disk round. Hands
+                    back a "body": everything render() needs.
 
-     render(b, a)   Run once per animation frame, at spin angle a.
+     render(b, a)   Run for every frame drawn, at spin angle a.
                     For every glyph in the grid: fire a ray, find
                     where it meets the surface, light that point,
                     ask the texture how bright the ground is there,
@@ -292,16 +294,13 @@ var Cosmos = (function () {
 
   /* --- config ---------------------------------------------- */
 
-  /* The opening planet, and the complete list of settings the renderer
-     honors. app.js builds its sliders against these keys and emit.js reads
-     the same object, so a new setting starts here and nowhere else. */
+  /* The opening planet, and the complete list of settings. app.js builds its
+     sliders against these keys and emit.js reads the same object, so a new
+     setting starts here and nowhere else. */
   function defaults() {
     return {
       texture:   'rock',
-      rows:      24,        // glyph rows; columns follow from CHAR_ASPECT.
-                            // app.js overwrites this from `size` before every
-                            // build, the way it does with `wide`
-      size:      6,         // glyph height in px; the row count comes from it
+      size:      6,         // glyph height in px; app.js turns it into rows
       brightness: 1.00,     // multiplies the shaded result
       ambient:   0.16,      // light on the night side
       craters:   15,
@@ -312,7 +311,6 @@ var Cosmos = (function () {
       tilt:      0.30,
       roll:      0.10,
       zoom:      0.70,      // 1 is the body filling the frame, less pulls back
-      wide:      1.00,      // frame width over height; app.js fits it to the panel
       rings:     false,
       ringInner: 1.30,
       ringOuter: 2.30,
@@ -323,6 +321,11 @@ var Cosmos = (function () {
 
   /* Everything derived from a config once, so the per-glyph loop below never
      allocates or re-seeds. Call this when settings change, not per frame.
+
+     `grid` is the part of the picture that comes from the page rather than
+     from the settings: `rows`, how many rows of glyphs to draw, and `wide`,
+     the shape of the frame as width over height. app.js measures both off
+     the preview panel. Without one, the frame is a small square.
 
      What comes back, and who reads it:
 
@@ -339,12 +342,13 @@ var Cosmos = (function () {
        shape, facets, knobs       deformation lobes, read by radius()
        elong                      how far the body is stretched along bx
        rings                      ring geometry, or null */
-  function build(cfg) {
+  function build(cfg, grid) {
     var c = cfg || defaults();
+    var g = grid || {};
     var lump = c.lumpiness || 0;
     var b = {
       tex:     TEXTURES[c.texture] || TEXTURES.rock,
-      rows:    Math.max(6, Math.round(c.rows)),
+      rows:    Math.max(6, Math.round(g.rows > 0 ? g.rows : 24)),
       amb:     c.ambient,
       gain:    c.brightness,
       tilt:    c.tilt,
@@ -361,9 +365,9 @@ var Cosmos = (function () {
                            gaps: [[1.68, 1.78], [2.04, 2.09]] } : null
     };
 
-    /* Three scales of deformation, all generated from the seed. Hand-picking
-       amplitudes was the trap here: one broad lobe well above its neighbors
-       reads as a spike rather than as terrain. */
+    /* Three scales of deformation, all generated from the seed rather than
+       hand-picked: one broad lobe well above its neighbors reads as a spike
+       rather than as terrain. */
     b.shape  = lobes(c.seed ^ 0x51F0AA, 5,  0.105 * lump, 0.075 * lump, 0.50);
     b.facets = lobes(c.seed ^ 0xA33C17, 14, 0.034 * lump, 0.042 * lump, 0.45);
     b.knobs  = lobes(c.seed ^ 0xB0C1D2, 24, 0.018 * lump, 0.036 * lump, 0.45);
@@ -384,12 +388,10 @@ var Cosmos = (function () {
       }
       b.max = m * 1.05;
     }
-    /* How far the body reaches, in body radii, and it is never a function of
-       tilt or roll. That is the whole point: the frame used to be fitted to
-       the body's projected silhouette, so every nudge of either slider resized
-       the frame, and the planet appeared to swell and shrink while the pole
-       swung around. It should sit still and turn, so the reach is measured in
-       BODY space, where turning the body changes nothing.
+    /* How far the body reaches, in body radii. It is measured in BODY space,
+       where turning the body changes nothing, so tilt and roll never resize
+       the frame: the planet sits still and turns rather than swelling and
+       shrinking while the pole swings around.
 
        The price is a little empty sky beside a ring system seen edge on: the
        frame is cut for the rings at their widest, whatever angle they are
@@ -402,16 +404,15 @@ var Cosmos = (function () {
     var ROOM = 1.02;
     var zoom = c.zoom > 0 ? c.zoom : 1;   // a zero here would blow the frame up
 
-    /* The frame is cut to the shape of whatever it has to fill, which app.js
-       measures off the preview panel and passes in as `wide`. A square grid
-       in a wide panel is a box with dead space either side of it, and zooming
-       in then grows the body inside that box instead of filling the window.
+    /* The frame is cut to the shape of whatever it has to fill, so the grid
+       covers the whole panel rather than sitting in it as a box with dead
+       space down either side.
 
-       Clamped because the grid is rows * wide columns wide: a window shaped
-       like a letterbox would otherwise ask for tens of thousands of glyphs
-       per frame to fill it. Past the clamp the art simply stops reaching the
-       side edges, which is the old behavior and no worse than it was. */
-    var wide = clamp(c.wide > 0 ? c.wide : 1, 0.25, 4);
+       Clamped because the column count grows with it: a window shaped like
+       a letterbox would otherwise ask for tens of thousands of glyphs per
+       frame to fill it. Past the clamp the art simply stops short of the
+       side edges. */
+    var wide = clamp(g.wide > 0 ? g.wide : 1, 0.25, 4);
     b.cols = Math.max(8, Math.round(b.rows * wide / CHAR_ASPECT));
 
     /* The reach has to fit the frame's SHORTER side, or zoom 1 runs the body
@@ -464,8 +465,9 @@ var Cosmos = (function () {
   /* --- render ---------------------------------------------- */
 
   /* The frame's orientation, from tilt and roll: the spin axis n, in view
-     space, and two more axes u and v lying across the equator. Shared by
-     see() and render(), so both work from the same numbers to the last bit.
+     space, and two more axes u and v lying across the equator. Worked out
+     once per body by see() and kept in the view cache, so render() turns the
+     body about the very same axes the cache was built on.
 
      Tilt leans the pole toward or away from the viewer; roll turns it within
      the plane of the screen. h is any direction that is not parallel to the
@@ -496,7 +498,7 @@ var Cosmos = (function () {
      So that fixed part is worked out once per body and kept here, and a frame
      is only the rotation and the texture lookup for each glyph. The preview
      draws many frames a second for as long as it is open, and redoing all of
-     this for every one of them was most of what set laptop fans spinning.
+     this for every one of them would be most of its work.
 
      Every value is computed with the same operations, in the same order, as
      the path that does not cache, so the frame comes out identical to the
@@ -507,11 +509,11 @@ var Cosmos = (function () {
      that turn with it, so which glyphs it covers really does change from one
      angle to the next.
 
-     One cache, and its arrays are reused while the grid stays the same size.
-     The app draws one body at a time, and a slider drag builds a new body on
-     every step: allocating fresh arrays for each would churn out megabytes of
-     garbage a second. A body is treated as fixed once it is built; drawing a
-     different one rebuilds the cache. */
+     One cache, and its arrays are reused for as long as the grid does not
+     grow. The app draws one body at a time, and a slider drag builds a new
+     body on every step: allocating fresh arrays for each would churn out
+     megabytes of garbage a second. A body is treated as fixed once it is
+     built; drawing a different one rebuilds the cache. */
   var view = null;
 
   function see(b, old) {
@@ -537,6 +539,7 @@ var Cosmos = (function () {
       shadow: new Uint8Array(N)    // 1 where the planet shades the ring
     };
     c.body = b;
+    c.axes = a;
     c.ringsShown = !!rings && Math.abs(a.nz) > 0.05;
 
     for (var j = 0; j < H; j++) {
@@ -616,7 +619,7 @@ var Cosmos = (function () {
     var W = b.cols, H = b.rows, extX = b.extX, extY = b.extY;
     var lastIdx = RAMP.length - 1;
 
-    var a = axesOf(b);
+    var a = c.axes;
     var nx = a.nx, ny = a.ny, nz = a.nz, ux = a.ux, uy = a.uy, uz = a.uz;
     var vx = a.vx, vy = a.vy, vz = a.vz;
     var ca = Math.cos(angle), sa = Math.sin(angle);
@@ -738,10 +741,9 @@ var Cosmos = (function () {
            ring happens to be at that radius.
 
            zs is -1e9 wherever the ray misses the body, so `zr > zs` already
-           covers open sky. It used to read (d2 > 1 || zr > zs), which assumed
-           the body ends at radius 1. A lumpy one does not, and every lump that
-           bulged past the unit circle had the rings drawn straight across it
-           even where they pass behind. */
+           covers open sky. It compares depths rather than asking whether the
+           glyph is outside radius 1, because a lumpy body bulges past radius
+           1, and the rings must still pass behind those lumps. */
         var back = sphere >= 0 ? sphere : 0;
         var v = (cov > 0 && zr > zs)
               ? ringLum * cov + back * (1 - cov)
@@ -750,11 +752,11 @@ var Cosmos = (function () {
            0..1 becomes one of ten characters.
 
            Index 0 of the ramp is a space, which is also what empty sky is
-           drawn with. A dark enough patch of surface therefore used to come
-           out indistinguishable from a gap in the planet, and on ice, whose
-           fractures bottom out near zero, that punched visible holes clean
-           through the disk. So ground that received any light at all gets at
-           least index 1, and the darkest lit ground is still ground.
+           drawn with, so a dark enough patch of surface would come out
+           looking like a gap in the planet. On ice, whose fractures bottom
+           out near zero, that punches holes clean through the disk. So
+           ground that received any light at all gets at least index 1, and
+           the darkest lit ground is still ground.
 
            "Any light at all" is v > 0, and it matters. Ground that got none,
            the night side with shadow turned all the way up, is meant to be as
@@ -776,10 +778,7 @@ var Cosmos = (function () {
   /* What the rest of the app can see.
 
      RAMP and LIGHT are out here because emit.js bakes them into the generated
-     source, so there is one definition behind all three programs. That was
-     the intent from the start, but only LIGHT was wired up: emit.js carried
-     its own copy of the ramp string, and changing the ramp here would have
-     quietly left both exports drawing the old one.
+     source, so there is one definition of each behind all three programs.
 
      TEXTURES is exposed so the list of names can be read rather than typed
      out again, which is what Randomize does with it. */

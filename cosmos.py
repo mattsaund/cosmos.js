@@ -4,17 +4,19 @@
     python3 cosmos.py
 
 Serves web/ on a loopback port, opens your browser at it, and shuts itself down
-when the page stops answering. Closing the tab closes the program.
+once the page is gone. Closing the tab closes the program.
 
 Standard library only, and all of it is plumbing: the generator itself is the
 JavaScript under web/, which is also what runs if you just open web/index.html
 straight off the disk.
 
-How the shutdown works: the page pings /__alive every couple of seconds. A
-watchdog thread arms on the first ping and stops the server once the pings stop
-for --timeout seconds. That survives a reload, which takes well under the
-timeout, and it does not rely on catching a close event the browser is under no
-obligation to send.
+How the shutdown works: as the page goes away it sends a goodbye to /__bye, and
+the server stops a few seconds later unless a page says hello again first,
+which is what a reload does. While the page is open it also pings /__alive
+every couple of seconds. If the pings stop for --timeout seconds without a
+goodbye, a crashed browser say, the server stops anyway. That timeout is
+generous on purpose: a browser can slow a background tab's timers to one a
+minute, and a tab in the background is still open.
 """
 import argparse
 import http.server
@@ -26,7 +28,9 @@ import webbrowser
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 PING_PATH = "/__alive"    # kept in step with the fetch() in web/js/app.js
-IDLE_TIMEOUT = 5.0        # seconds of silence before the server gives up
+BYE_PATH = "/__bye"       # and with the sendBeacon() beside it
+IDLE_TIMEOUT = 90.0       # seconds of silence before the server gives up
+GRACE = 5.0               # seconds a goodbye waits for a reload to say hello
 POLL = 0.5                # how often the watchdog checks, in seconds
 
 
@@ -35,18 +39,27 @@ class State:
 
     def __init__(self):
         self.last_ping = None          # None until the page first says hello
+        self.leaving = False           # True after a goodbye, until a hello
         self.lock = threading.Lock()
 
-    def touch(self):
+    def touch(self, leaving=False):
+        """Note that the page was heard from: a ping, or a goodbye."""
         with self.lock:
             self.last_ping = time.monotonic()
+            self.leaving = leaving
 
-    def silent_for(self):
-        """Seconds since the last ping, or None if there has never been one."""
+    def gone(self, timeout, grace):
+        """True once the page has been quiet for longer than it may be.
+
+        That is `grace` seconds after a goodbye and `timeout` seconds after a
+        ping. Never true before the first ping, so a browser that takes its
+        time opening cannot stop the server before the page has loaded.
+        """
         with self.lock:
             if self.last_ping is None:
-                return None
-            return time.monotonic() - self.last_ping
+                return False
+            limit = grace if self.leaving else timeout
+            return time.monotonic() - self.last_ping > limit
 
 
 def make_handler(state, quiet):
@@ -58,26 +71,28 @@ def make_handler(state, quiet):
     """
 
     class Handler(http.server.SimpleHTTPRequestHandler):
-        """Serves web/, with one extra route: PING_PATH, the heartbeat."""
+        """Serves web/, with two extra routes: the heartbeat and the goodbye."""
 
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=ROOT, **kw)
 
-        def _ping(self):
-            state.touch()
+        def _heard(self, leaving=False):
+            state.touch(leaving)
             self.send_response(204)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
         def do_POST(self):
             if self.path == PING_PATH:
-                self._ping()
+                self._heard()
+            elif self.path == BYE_PATH:
+                self._heard(leaving=True)
             else:
                 self.send_error(404)
 
         def do_GET(self):
             if self.path == PING_PATH:
-                self._ping()
+                self._heard()
             else:
                 super().do_GET()
 
@@ -95,13 +110,10 @@ def make_handler(state, quiet):
 
 
 def watchdog(state, server, timeout):
-    """Arms on the first ping, then shuts the server down when they stop."""
+    """Shuts the server down once the page has gone, see State.gone()."""
     while True:
         time.sleep(POLL)
-        silent = state.silent_for()
-        if silent is None:
-            continue                    # the page has not loaded yet; keep waiting
-        if silent > timeout:
+        if state.gone(timeout, GRACE):
             server.shutdown()
             return
 
@@ -118,8 +130,8 @@ def main(argv=None):
     ap.add_argument("--no-open", action="store_true",
                     help="do not open a browser, just print the URL")
     ap.add_argument("--timeout", type=float, default=IDLE_TIMEOUT,
-                    help="seconds without a ping before shutting down "
-                         "(default: %(default)s)")
+                    help="seconds without a ping before shutting down, when the "
+                         "page never said goodbye (default: %(default)s)")
     ap.add_argument("--verbose", action="store_true", help="log every request")
     args = ap.parse_args(argv)
 

@@ -227,7 +227,7 @@ input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px;
 .seg button:last-child  { border-radius: 0 var(--r) var(--r) 0; }
 /* Pull the neighbor onto the shared edge so the two borders read as one
    hairline. Dropping a border instead would leave the selected button missing
-   that side of its outline, which is what used to happen here. */
+   that side of its outline. */
 .seg button + button { margin-left: -1px; }
 /* Raised, so its complete outline draws over the neighbor's gray. */
 .seg button.is-on {
@@ -261,14 +261,12 @@ button:hover { color: var(--accent); border-color: var(--accent); }
    is wide. The frame in planet.js fits whichever side is shorter, so
    the planet stays whole either way.
 
-   The stage fills the panel exactly. A square stage once sat centered
-   inside a wider panel, and the panel's gray showed down both sides of
-   the planet as two bars.
+   The stage fills the panel exactly, so none of the panel's gray can
+   show down the sides of the planet.
 
-   Flat black on purpose. This carried a faint radial wash behind the
-   planet, which is invisible on some monitors and reads as a halo
-   around the art on others. The planet is meant to be ASCII and
-   nothing else. */
+   Flat black on purpose. Even a faint wash behind the planet is
+   invisible on some monitors and reads as a halo around the art on
+   others. The planet is meant to be ASCII and nothing else. */
 .preview {
   position: relative;
   height: 100%;
@@ -305,7 +303,7 @@ button:hover { color: var(--accent); border-color: var(--accent); }
   background: var(--bg);
   border-radius: var(--r);
   /* hidden, not auto. The art is fitted to this box every paint, so it can
-     only ever overrun it by a sub-pixel rounding error, and `auto` turned
+     only ever overrun it by a sub-pixel rounding error, and `auto` would turn
      that fraction of a pixel into a pair of real scrollbars across a picture
      with nothing to scroll to. */
   overflow: hidden;
@@ -335,7 +333,7 @@ button:hover { color: var(--accent); border-color: var(--accent); }
 .src {
   display: none;
   margin: 0; padding: 14px;
-  /* The pane is the scrolling box now, not the page. flex:1 inside the code
+  /* The pane is the scrolling box, not the page. flex:1 inside the code
      panel gives it every pixel the tab row does not want. */
   flex: 1 1 auto; min-height: 0; overflow: auto;
   /* Type sized to the column, so the longest line emit.js can write always

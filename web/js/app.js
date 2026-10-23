@@ -11,22 +11,24 @@
    ------------------------------------------------------------
    WHAT HAPPENS WHEN A SLIDER MOVES
 
-     the control's handler writes cfg[key]
+     the control's handler writes cfg[key], then calls changed():
        -> sync()       pushes cfg back out to every control: the
                        readouts, the rows that hide themselves, any
                        value it had to nudge to stay sensible
-       -> rebuild()    body = Cosmos.build(cfg), then:
+       -> rebuild()    body = Cosmos.build(cfg, grid), then:
             paint()    draw one frame into the <pre>
             code()     re-emit both source panes
 
-   Color and spin skip rebuild(): they change how a frame is
-   painted, not what is in it. They carry `preview: true` in SPEC.
-   Font size does not: it decides how many rows the grid has, and
-   that is a different body.
+   Spin, direction, rotation speed and color skip rebuild(), because
+   build() never reads them: the body they would rebuild is the one
+   already there. They carry `keepBody: true` in SPEC. Font size
+   does not: it decides how many rows the grid has, and that is a
+   different body.
 
-   Running alongside all of that, tick() sits on
-   requestAnimationFrame forever, moves the angle on by however much
-   real time has passed, and calls paint().
+   While the planet spins, tick() runs on requestAnimationFrame,
+   moves the angle on by however much real time has passed, and
+   calls paint() as often as the motion needs and the machine can
+   comfortably afford. With spin off the loop stops altogether.
 
    cfg is the single source of truth. Everything on the page is
    derived from it, never the other way round, which is why sync()
@@ -73,7 +75,7 @@
   Cosmos.setAspect(measureAspect());
 
   var cfg = Cosmos.defaults();
-  var body = Cosmos.build(cfg);
+  var body = null;   // what Cosmos.build made of cfg; rebuild() keeps it current
 
   /* --- SPEC: every control, as data ------------------------- *
      In page order. One entry is one row of the controls panel.
@@ -90,7 +92,8 @@
                  does not read as anything, so it stays a position
        fmt       how a real slider or a number box reads out
        invert    the slider runs backward against the value it writes
-       preview   cheap: repaint, but do not rebuild the body
+       keepBody  build() never reads this setting, so changing it skips
+                 the rebuild, see changed()
        when      only show this row while cfg[when] is truthy
 
      Adding a knob is one entry here plus one key in Cosmos.defaults().
@@ -100,10 +103,10 @@
         ['rock', 'rock'], ['ice', 'ice'],
         ['gas', 'gas giant'], ['lava', 'lava'], ['desert', 'desert']
       ] },
-    /* Glyph height, which is the only resolution control there is now that
-       the grid always fills the panel: a smaller glyph is simply more of them.
-       rebuild() turns this into a row count, so the number on the slider is
-       the number of pixels a character actually gets. */
+    /* Glyph height, and so the resolution as well: the grid always fills the
+       panel, so a smaller glyph is simply more of them. rebuild() turns this
+       into a row count, and the number on the slider is the height in pixels
+       a character actually gets. */
     { key: 'size', name: 'font size', type: 'range', min: 4, max: 40, real: true,
       fmt: function (v) { return Math.round(v) + ' px'; } },
     /* How much of the panel the body fills, from a speck to the whole thing.
@@ -131,11 +134,12 @@
        a texture or lining up a frame to copy. The two controls it hides do
        reach the exports, so a parked preview still exports a spinning planet
        at the speed and direction last set here. */
-    { key: 'spin', name: 'spin', type: 'check', preview: true },
-    { key: 'direction', name: 'direction', type: 'seg', when: 'spin',
+    { key: 'spin', name: 'spin', type: 'check', keepBody: true },
+    { key: 'direction', name: 'direction', type: 'seg', when: 'spin', keepBody: true,
       options: [[-1, 'clockwise'], [1, 'counterclockwise']] },
-    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, when: 'spin' },
-    { key: 'color', name: 'color', type: 'color', preview: true },
+    { key: 'speed', name: 'rotation speed', type: 'range', min: 0, max: 0.6, when: 'spin',
+      keepBody: true },
+    { key: 'color', name: 'color', type: 'color', keepBody: true },
     /* A number box, so it carries the value itself, never a 0 to 100
        position. The top is the PRNG's own: seeds are read as unsigned 32 bit,
        so anything past it would just wrap round to a smaller one. */
@@ -164,10 +168,15 @@
     if (c.real) return p;
     var t = clamp01(p / SLIDER_MAX);
     if (c.invert) t = 1 - t;
-    return c.min + t * (c.max - c.min);
+    return tidy(c.min + t * (c.max - c.min));
   }
 
   function clamp01(t) { return t < 0 ? 0 : t > 1 ? 1 : t; }
+
+  /* Rounded to six places, far finer than one step of any slider. Both
+     exports write each setting out digit for digit (see n() in emit.js),
+     and this is what keeps that to 0.182 rather than 0.18200000000000016. */
+  function tidy(v) { return Math.round(v * 1e6) / 1e6; }
 
   var host = document.getElementById('controls');
   var out = document.getElementById('out');
@@ -247,8 +256,7 @@
         b.textContent = o[1];
         b.addEventListener('click', function () {
           cfg[c.key] = Number(o[0]);
-          sync();
-          rebuild();
+          changed(c);
         });
         input.appendChild(b);
       });
@@ -274,38 +282,33 @@
            Number() reads as 0 or NaN. Neither is a setting, so wait for the
            next keystroke instead of redrawing a planet nobody asked for. */
         if (input.value === '' || !isFinite(raw)) return;
-        /* Only a slider is a position to translate. A number box already holds
-           the value: running it through fromSlider too, as this once did, asked
-           for a max the seed did not have and stored NaN for every seed. */
+        /* A slider holds a position to translate. A number box holds the
+           value itself, kept to a whole number inside its range. */
         cfg[c.key] = c.type === 'range'
           ? fromSlider(c, raw)
           : Math.min(c.max, Math.max(c.min, Math.floor(raw)));
-        sync();
-        /* A `preview` setting only changes how the frame is painted, so it can
-           skip rebuilding the body. None of the sliders is one today, but the
-           check stays generic so a future one gets the cheap path for free. */
-        if (c.preview) { dress(); paint(); code(); } else rebuild();
+        changed(c);
       });
     } else if (c.type === 'select') {
-      input.addEventListener('change', function () {
-        cfg[c.key] = input.value;
-        sync(); rebuild();
-      });
+      input.addEventListener('change', function () { cfg[c.key] = input.value; changed(c); });
     } else if (c.type === 'check') {
-      input.addEventListener('change', function () {
-        cfg[c.key] = input.checked;
-        sync();
-        if (c.preview) { dress(); paint(); code(); } else rebuild();
-      });
+      input.addEventListener('change', function () { cfg[c.key] = input.checked; changed(c); });
     } else if (c.type === 'color') {
-      input.addEventListener('input', function () {
-        cfg[c.key] = input.value;
-        sync(); dress(); paint(); code();
-      });
+      input.addEventListener('input', function () { cfg[c.key] = input.value; changed(c); });
     }
 
     host.appendChild(wrap);
   });
+
+  /* Everything a control does once its value is in cfg. A `keepBody`
+     setting is one build() never reads, so the body stays as it is and only
+     what hangs off the setting is redone: the pace for speed, the ink for
+     color, the source panes for both. Anything else is a new body. */
+  function changed(c) {
+    sync();
+    if (c.keepBody) { gap = paceOf(); dress(); code(); }
+    else rebuild();
+  }
 
   /* --- state -> controls ------------------------------------ */
 
@@ -314,6 +317,13 @@
      than from a control (Randomize, Reset, the console hook), which is why it
      rewrites every row rather than just the one that moved. */
   function sync() {
+    /* An inner radius above the outer one draws nothing at all, which looks
+       like a bug rather than a setting. Keep them ordered before anything is
+       shown, so the rows below report the nudged value like any other. */
+    if (cfg.ringOuter < cfg.ringInner + 0.15) {
+      cfg.ringOuter = tidy(Math.min(nodes.ringOuter.spec.max, cfg.ringInner + 0.15));
+    }
+
     SPEC.forEach(function (c) {
       var nd = nodes[c.key], v = cfg[c.key];
       if (c.type === 'seg') {
@@ -324,9 +334,7 @@
         nd.input.checked = !!v;
       } else if (c.type === 'range') {
         /* The only control whose page value is not its config value. A select,
-           a color well and a number box all carry the setting itself, and
-           running those through toSlider asks for (v - undefined), which lands
-           NaN in the element and empties it. */
+           a color well and a number box all carry the setting itself. */
         nd.input.value = toSlider(c, v);
       } else {
         nd.input.value = v;
@@ -344,21 +352,10 @@
                                         : String(toSlider(c, v));
       }
 
-      /* Ring radii are meaningless with the rings switched off. */
+      /* Rows that mean nothing right now, like the ring radii with the rings
+         switched off, are hidden rather than left to be dragged for nothing. */
       if (c.when) nd.wrap.style.display = cfg[c.when] ? '' : 'none';
     });
-
-    /* An inner radius above the outer one draws nothing at all, which looks
-       like a bug rather than a setting. Keep them ordered, and push the nudge
-       back out through toSlider: the row is a 0 to 100 slider like every other
-       one, so writing a radius straight into it would peg the thumb at the end
-       and print a number the page never uses. */
-    if (cfg.ringOuter < cfg.ringInner + 0.15) {
-      var nd = nodes.ringOuter;
-      cfg.ringOuter = Math.min(nd.spec.max, cfg.ringInner + 0.15);
-      nd.input.value = toSlider(nd.spec, cfg.ringOuter);
-      nd.val.textContent = String(toSlider(nd.spec, cfg.ringOuter));
-    }
 
     wake();   // spin may have just come on, from a checkbox, Reset or the console
   }
@@ -366,9 +363,10 @@
   /* --- render loop ------------------------------------------ */
   var angle = 0;       // how far the body has turned, in radians
   var last = 0;        // timestamp of the previous tick; 0 while the loop is parked
-  var painted = 0;     // timestamp of the last repaint while spinning
+  var painted = 0;     // timestamp of the last repaint
   var gap = 0;         // milliseconds between repaints while spinning, see paceOf()
-  var drawPx = 8;      // the font size the art is drawn at, see fitIn()
+  var cost = 0;        // what a repaint costs the main thread, in ms, see tick()
+  var drawPx = 8;      // the font size the art is drawn at, see fitIn() and settle()
   var shown = '';      // the frame that is in the <pre> right now
   var looping = false; // whether tick() is scheduled
 
@@ -383,31 +381,35 @@
      that only changes when this runs. */
   function rebuild() {
     var box = stageBox();
-    cfg.wide = shapeOf(box);            // the frame is cut to the panel it fills
-    cfg.rows = rowsFor(box, cfg.size);  // and the grid to the glyph size asked for
-    body = Cosmos.build(cfg);
+    /* The frame is cut to the panel it fills, and the grid to the glyph size
+       asked for. Neither is a setting, so neither lives in cfg. */
+    body = Cosmos.build(cfg, { rows: rowsFor(box, cfg.size), wide: shapeOf(box) });
     drawPx = fitIn(box);
     gap = paceOf();
     dress();
     paint();
+    settle(box);
     code();
+    /* That was a fresh frame, so tick() can wait a full beat before the next.
+       While a slider is dragged, this is what stops the planet being drawn
+       twice a frame, once here and once more by the loop. */
+    painted = performance.now();
   }
 
-  /* The stage's inner box, in CSS px. Everything about the grid is measured
-     off this one rectangle: its shape becomes the frame's shape, its height
-     over the font size becomes the row count, and the two together decide
-     the size the glyphs are finally drawn at. Zero on either side means the
-     page is not laid out yet, which every caller checks for. */
+  /* The stage's box, in CSS px. Everything about the grid is measured off
+     this one rectangle: its shape becomes the frame's shape, its height over
+     the font size becomes the row count, and the two together decide the
+     size the glyphs are finally drawn at. The stage has no padding (see
+     .stage in app.css), so its client size is all the art gets. Zero on
+     either side means the page is not laid out yet, which every caller
+     checks for. */
   function stageBox() {
-    var cs = getComputedStyle(stage);
-    return { w: stage.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
-             h: stage.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) };
+    return { w: stage.clientWidth, h: stage.clientHeight };
   }
 
-  /* The panel's shape, width over height. Cosmos.build cuts the frame to this
-     so the glyph grid covers the whole panel instead of a square box sitting
-     inside it, which is what put a visible edge around the art and made zoom
-     grow the body inside that edge rather than out to the window. */
+  /* The panel's shape, width over height. Cosmos.build cuts the frame to this,
+     so the glyph grid covers the whole panel rather than sitting inside it as
+     a smaller box with an edge around the art. */
   function shapeOf(box) {
     return (box.w > 0 && box.h > 0) ? box.w / box.h : 1;
   }
@@ -429,9 +431,8 @@
      The row count is a whole number, so the glyph height can only land within
      half a row of what was asked for: the error is px * px / (2 * height), a
      fraction of a pixel at 6px and under a pixel at 40. Honoring the request
-     exactly would mean leaving up to a row of empty panel under the art,
-     which is the border this layout spent so long getting rid of. The slider
-     is a request, filled to within less than one glyph. */
+     exactly would mean leaving up to a row of empty panel under the art. The
+     slider is a request, filled to within less than one glyph. */
   var GLYPH_BUDGET = 180000;
 
   function rowsFor(box, px) {
@@ -447,26 +448,43 @@
 
      Never smaller than the fit, and that is the point: the grid is cut to the
      panel's shape, so any smaller size would just leave a margin, and a
-     margin around the art is what made the planet look boxed in.
+     margin around the art makes the planet look boxed in.
 
-     Not rounded to whole pixels either. Rounding down cost up to one pixel per
-     row, which at a hundred rows is a hundred pixels of slack along the bottom
-     edge, visible as exactly the border the planet is not supposed to have. */
+     Not rounded to whole pixels either. Rounding down would cost up to a
+     pixel per row, which over a couple of hundred rows is a visible strip of
+     empty panel along the bottom edge. */
   function fitIn(box) {
     if (!(box.w > 0 && box.h > 0)) return 8;    // nothing laid out yet to measure
     return Math.max(2, Math.min(box.w / (body.cols * Cosmos.aspect()), box.h / body.rows));
   }
 
-  /* How long to wait between repaints while the planet turns.
+  /* fitIn() trusts the arithmetic, and a browser may lay the glyphs out a
+     hair wider than it says. Firefox rounds every glyph's advance to a
+     sixtieth of a pixel, which over a few hundred columns comes to a pixel
+     or two: enough to cut off the last column and push the art off center.
+     So look at what was actually laid out, and shrink the type until it
+     fits. Once per rebuild, never per frame, and where nothing overruns it
+     costs one measurement of a layout that was happening anyway. */
+  function settle(box) {
+    if (!(box.w > 0 && box.h > 0)) return;      // nothing laid out yet to fit
+    for (var k = 0; k < 3; k++) {
+      var r = out.getBoundingClientRect();
+      if (!(r.width > box.w || r.height > box.h)) return;
+      drawPx *= Math.min(box.w / r.width, box.h / r.height);
+      out.style.fontSize = drawPx.toFixed(3) + 'px';
+    }
+  }
+
+  /* How long to wait between repaints while the planet turns, going by the
+     motion alone. tick() may wait longer still, see DUTY.
 
      The art can only show movement in whole glyphs, so repainting faster than
      the surface crosses a glyph just draws the same picture again. At the
      default speed the surface takes most of a tenth of a second to cross one,
-     and repainting sixty times a second regardless was spending most of a CPU
-     core redrawing frames that had not changed: the fans noticed. So this
-     paces repaints at two per glyph crossing at the fastest moving point,
-     never more often than the screen refreshes, and never less than four a
-     second.
+     so repainting sixty times a second regardless would spend most of a CPU
+     core redrawing frames that had not changed. Instead this paces repaints
+     at two per glyph crossing at the fastest moving point, never more often
+     than the screen refreshes, and never less than four a second.
 
      The fastest point is the equator facing the viewer, out at the body's
      furthest reach for a lumpy one, or the inner edge of the rings, whose
@@ -503,12 +521,19 @@
     shown = art;
   }
 
+  /* The least time the loop leaves between repaints, as a multiple of what a
+     repaint costs. At 3, drawing the planet never takes more than about a
+     third of the main thread. Only heavy frames ever reach this, a lumpy
+     body at a small font size above all: they are drawn less often rather
+     than pinning a core, and the page stays responsive around them. */
+  var DUTY = 3;
+
   /* The animation loop, scheduled only while the planet spins.
 
      The angle advances by real elapsed time rather than a fixed step, so a
      slow frame does not slow the planet down, and it advances on every tick
-     even when that tick does not repaint, so the pace in paceOf() never
-     changes how fast the planet turns, only how often it is drawn.
+     even when that tick does not repaint, so pacing never changes how fast
+     the planet turns, only how often it is drawn.
 
      With spin off the loop stops outright rather than ticking over idle, and
      wake() starts it again. Starting again from last = 0 is what stops the
@@ -520,9 +545,19 @@
     last = now;
     /* Half a refresh of slack, so a 33ms pace lands on every second frame of
        a 60Hz screen rather than drifting to every third. */
-    if (now - painted < gap - 8) return;
+    if (now - painted < Math.max(gap, cost * DUTY) - 8) return;
     painted = now;
+
+    var t0 = performance.now();
     paint();
+    /* Asking for a size makes the browser lay the new frame out now rather
+       than after this callback, so the time below covers the layout too. It
+       is the same layout either way; this only moves it. */
+    void out.offsetHeight;
+    var ms = performance.now() - t0;
+    /* Smoothed, so one slow frame, a garbage collection say, does not hold
+       the planet back for long. */
+    cost = cost ? cost * 0.75 + ms * 0.25 : ms;
   }
 
   /* Start the loop if the planet should be spinning and it is not already
@@ -609,12 +644,14 @@
   }
 
   /* Tab switching, which is only ever a class on the tab and a class on the
-     pane it names. The panes are both already up to date. */
+     pane it names, plus the tab's aria-selected for screen readers. The panes
+     are both already up to date. */
   Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (t) {
     t.addEventListener('click', function () {
       current = t.dataset.pane;
       Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (o) {
         o.classList.toggle('is-on', o === t);
+        o.setAttribute('aria-selected', String(o === t));
       });
       document.getElementById('pane-py').classList.toggle('is-on', current === 'py');
       document.getElementById('pane-js').classList.toggle('is-on', current === 'js');
@@ -632,22 +669,20 @@
     return btn.dataset.label;
   }
 
-  /* Say `word` on `btn` for a beat, then put its own name back. */
+  /* Say `word` on `btn` for a beat, then put its own name back. A second
+     press inside that beat starts the beat over rather than letting the
+     first one's timer cut the second word short. */
   function flash(btn, word) {
     var label = restingLabel(btn);
     btn.textContent = word;
-    setTimeout(function () { btn.textContent = label; }, 1200);
+    clearTimeout(btn.flashTimer);
+    btn.flashTimer = setTimeout(function () { btn.textContent = label; }, 1200);
   }
 
-  /* Put `text` on the clipboard, then flash `btn` to say it worked and set it
-     back afterward. Both copy buttons come through here: Copy in the code
-     panel head, which takes whichever source pane is on show, and Copy planet
-     under the controls, which takes the art.
-
-     The resting label is read off the button once and remembered on it. It
-     used to be passed in, and the copy in this file drifted out of step with
-     the HTML the moment the button was renamed, so a copied planet left the
-     button reading something the page had never said.
+  /* Put `text` on the clipboard, then flash `btn` to say it worked. Both copy
+     buttons come through here: Copy in the code panel head, which takes
+     whichever source pane is on show, and Copy planet under the controls,
+     which takes the art.
 
      navigator.clipboard needs a secure context, and this tool is meant to work
      opened straight off the disk over file://. Fall back to a scratch textarea
@@ -700,7 +735,7 @@
      column indices, or null if there is no ink at all.
 
      Worth trimming rather than drawing as is. The frame deliberately carries
-     empty sky now that its reach no longer tracks the pole, and a ring system
+     empty sky, since it is cut to hold the body at any tilt, and a ring system
      seen edge on sits in a band through the middle of it. Saving that verbatim
      spends most of a 4K canvas on black. */
   function inkBox(lines) {
@@ -725,9 +760,10 @@
      but it is the canvas doing the drawing, so it is the canvas that gets to
      say whether the art fits. */
   function shotCanvas(text, color) {
-    var box = inkBox(text.split('\n'));
+    var all = text.split('\n');
+    var box = inkBox(all);
     if (!box) return null;                       // nothing drawn, nothing to save
-    var lines = text.split('\n').slice(box[0], box[1] + 1).map(function (l) {
+    var lines = all.slice(box[0], box[1] + 1).map(function (l) {
       return l.slice(box[2], box[3] + 1);
     });
     var rows = lines.length, cols = box[3] - box[2] + 1, i;
@@ -761,9 +797,11 @@
 
   var shotBtn = document.getElementById('screenshot');
   shotBtn.addEventListener('click', function () {
-    /* Both read before anything async, so what gets saved is the frame that
-       was up when the button went down rather than one a few turns later. */
+    /* All read before anything async, so what gets saved is the frame that
+       was up when the button went down rather than one a few turns later, and
+       the file is named for the planet it shows. */
     var text = out.textContent, color = cfg.color;
+    var file = 'cosmos-' + cfg.texture + '-' + Math.round(cfg.seed) + '.png';
 
     var save = function () {
       var cv = shotCanvas(text, color);
@@ -773,7 +811,7 @@
         var url = URL.createObjectURL(blob);
         var a = document.createElement('a');
         a.href = url;
-        a.download = 'cosmos-' + cfg.texture + '-' + Math.round(cfg.seed) + '.png';
+        a.download = file;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -803,23 +841,31 @@
     var r = function (lo, hi) { return lo + Math.random() * (hi - lo); };
     cfg.texture = pick(Object.keys(Cosmos.TEXTURES));
     cfg.seed = Math.floor(Math.random() * 1e9);
-    cfg.craters = Math.round(r(4, 34));
-    cfg.lumpiness = cfg.texture === 'rock' ? r(0.5, 1.2) : (Math.random() < 0.25 ? r(0.1, 0.5) : 0);
-    cfg.tilt = r(-0.9, 0.9);
-    cfg.roll = r(-1.2, 1.2);
-    cfg.speed = r(0.03, 0.28);
+    slide('craters', r(4, 34));
+    slide('lumpiness', cfg.texture === 'rock' ? r(0.5, 1.2) : (Math.random() < 0.25 ? r(0.1, 0.5) : 0));
+    slide('tilt', r(-0.9, 0.9));
+    slide('roll', r(-1.2, 1.2));
+    slide('speed', r(0.03, 0.28));
     cfg.direction = Math.random() < 0.5 ? 1 : -1;
-    cfg.brightness = r(0.75, 1.35);
-    cfg.ambient = r(0.05, 0.3);
+    slide('brightness', r(0.75, 1.35));
+    slide('ambient', r(0.05, 0.3));
     cfg.color = hsl(Math.random() * 360, 55 + Math.random() * 35, 60 + Math.random() * 22);
     cfg.rings = Math.random() < 0.35;
     if (cfg.rings) {
-      cfg.ringInner = r(1.15, 1.5);
-      cfg.ringOuter = cfg.ringInner + r(0.5, 1.4);
-      if (Math.abs(cfg.tilt) < 0.2) cfg.tilt = 0.2 + Math.random() * 0.4;  // else edge-on
+      slide('ringInner', r(1.15, 1.5));
+      slide('ringOuter', cfg.ringInner + r(0.5, 1.4));
+      if (Math.abs(cfg.tilt) < 0.2) slide('tilt', 0.2 + Math.random() * 0.4);  // else edge-on
     }
     sync(); rebuild();
   });
+
+  /* Set a slider's setting to the slider position nearest `v`, so a rolled
+     planet is one the sliders can show exactly: drag a thumb away and back
+     and the planet comes back with it, digit for digit. */
+  function slide(key, v) {
+    var c = nodes[key].spec;
+    cfg[key] = fromSlider(c, toSlider(c, v));
+  }
 
   /* HSL to hex. Picking a hue keeps every roll bright and saturated; picking
      three random bytes instead lands on mud about half the time. */
@@ -869,10 +915,13 @@
   };
 
   /* --- launcher handshake ---------------------------------- *
-     cosmos.py serves this page and shuts down when the pings stop, so closing
-     the tab closes the program. Opened over file:// there is nothing listening
-     and nothing to tell. keepalive lets the last ping survive the page going
-     away, which only shortens the wait.
+     cosmos.py serves this page and shuts down once the page is gone, so
+     closing the tab closes the program. It hears about that from a goodbye
+     sent to /__bye as the page goes away, and stops a few seconds later
+     unless a page says hello again, which is what a reload does. A ping
+     every two seconds while the page is open covers the times no goodbye
+     arrives, a crashed browser say. Opened over file:// there is nothing
+     listening and nothing to tell.
 
      The first ping decides whether to keep going. This page is also hosted on a
      plain static server, where /__alive is simply not a route: pinging it every
@@ -880,13 +929,19 @@
      that quietly gives up costs a single request. */
   if (location.protocol === 'http:' || location.protocol === 'https:') {
     var ping = function () {
-      return fetch('/__alive', { method: 'POST', keepalive: true })
+      return fetch('/__alive', { method: 'POST' })
         .then(function (r) { return r.ok; })
         .catch(function () { return false; });
     };
     try {
       ping().then(function (listening) {
-        if (listening) setInterval(ping, 2000);
+        if (!listening) return;
+        setInterval(ping, 2000);
+        /* A beacon is made for exactly this: the browser still sends it
+           after the page itself has gone. */
+        window.addEventListener('pagehide', function () {
+          if (navigator.sendBeacon) navigator.sendBeacon('/__bye');
+        });
       });
     } catch (e) { /* no fetch: the launcher falls back to its own timeout */ }
   }
@@ -894,7 +949,7 @@
   /* --- resize ----------------------------------------------- */
 
   /* A resized window is a differently shaped frame, so this is a full rebuild
-     rather than a repaint: the column count follows the panel now. Debounced
+     rather than a repaint: the column count follows the panel. Debounced
      because a drag fires this continuously and a rebuild re-scatters every
      feature. */
   var refit;
